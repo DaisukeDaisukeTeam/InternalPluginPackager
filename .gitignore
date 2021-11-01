@@ -2,3 +2,5 @@
 /resources/plugins/MultiWorld_dev-231
 /.idea
 /custompluginloader.phar
+/cache
+/cache.json

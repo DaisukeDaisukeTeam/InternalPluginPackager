@@ -1,10 +1,13 @@
 <?php
 
+namespace cli;
+
 class http{
 	public const TYPE_SEARCH = "plugin";
 
 	private array $cache = [];
 	private string $cachefile;
+	private bool $cachechanged = false;
 
 	public function __construct(string $cachedir){
 		$this->cachefile = $cachedir.DIRECTORY_SEPARATOR."cache.json";
@@ -14,12 +17,17 @@ class http{
 	}
 
 	public function writeCache() : void{
+		if(!$this->cachechanged){
+			return;
+		}
 		file_put_contents($this->cachefile, json_encode($this->cache, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+		$this->cachechanged = false;
 	}
 
-	public function get(string $url, $data = false, $request = false, string $github_token = "testtoken") : array{
-		if(strpos($url, "/") !== false){
-			$url = str_replace("https://api.github.com", "", $url);
+	public function getRawData(string $url, $data = false, $request = false, string $github_token = "testtoken") : string{
+		$url = str_replace("https://api.github.com", "", $url);
+		if(!str_starts_with($url, "https://github.com/")){
+			$url = "https://api.github.com".$url;
 		}
 		echo "\n";
 		if($request !== false){
@@ -30,16 +38,16 @@ class http{
 			var_dump("GET: ".$url);
 		}
 
-		$curl = curl_init("https://api.github.com".$url);
+		$curl = curl_init($url);
 
 		curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, FALSE); // オレオレ証明書対策
 		curl_setopt($curl, CURLOPT_FOLLOWLOCATION, TRUE);// Locationヘッダを追跡
 
 		//curl_setopt($curl, CURLOPT_CAINFO, '/path/to/cacert.pem');
 
-		curl_setopt($curl, CURLOPT_HTTPHEADER, [
+		/*curl_setopt($curl, CURLOPT_HTTPHEADER, [
 			'Authorization: token '.$github_token,
-		]);
+		]);*/
 
 		if($request !== false) curl_setopt($curl, CURLOPT_CUSTOMREQUEST, $request);
 		if($data !== false){
@@ -60,7 +68,6 @@ class http{
 		$statuscode = curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
 		//var_dump("StatusCode: ".$statuscode);
 		curl_close($curl);
-		$test = json_decode($return, true);
 
 		//var_dump($data);
 		//var_dump($test);
@@ -69,16 +76,25 @@ class http{
 			var_dump("StatusCode: ".$statuscode);
 			throw new \RuntimeException("request failed: received status code \"".$statuscode."\"");
 		}
-		return $test;
+		return $return;
+	}
+
+	/**
+	 * @throws \JsonException
+	 */
+	public function get(string $url, $data = false, $request = false, string $github_token = "testtoken") : array{
+		$return = $this->getRawData($url, $data, $request, $github_token);
+		return json_decode($return, true, 512, JSON_THROW_ON_ERROR);
 	}
 
 	public function search(string $plugin_name, bool $force = false) : array{
 		if(!$force&&isset($this->cache[self::TYPE_SEARCH][$plugin_name])){
-			return json_decode($this->cache[$plugin_name], true, 512, JSON_THROW_ON_ERROR);
+			return json_decode($this->cache[self::TYPE_SEARCH][$plugin_name], true, 512, JSON_THROW_ON_ERROR);
 		}
+		exit();
 		$url = 'https://poggit.pmmp.io/releases.json?name='.$plugin_name;
 		var_dump("GET: ".$url);
-		$curl = curl_init("https://api.github.com".$url);
+		$curl = curl_init($url);
 
 		curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, FALSE); // オレオレ証明書対策
 		curl_setopt($curl, CURLOPT_FOLLOWLOCATION, TRUE);// Locationヘッダを追跡
@@ -106,7 +122,8 @@ class http{
 			var_dump("StatusCode: ".$statuscode);
 			throw new \RuntimeException("request failed: received status code \"".$statuscode."\"");
 		}
-		$this->cache[$plugin_name] = $return;
+		$this->cache[self::TYPE_SEARCH][$plugin_name] = $return;
+		$this->cachechanged = true;
 		return $test;
 	}
 }
