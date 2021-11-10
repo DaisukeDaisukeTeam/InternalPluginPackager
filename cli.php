@@ -57,8 +57,10 @@ class cli{
 			$plugins = $this->requirePlugin($require, $version);
 			$descriptions = $this->LookingPlugins($plugins);
 			var_dump($descriptions);
-			$caches = $this->downloadZipball($descriptions);
-			var_dump($caches);
+			$descriptions = $this->downloadZipball($descriptions);
+			var_dump($descriptions);
+
+			$this->unzipping();
 
 			$this->getHttp()->writeCache();
 
@@ -67,11 +69,13 @@ class cli{
 	}
 
 	/**
-	 * @param list<string> $caches
+	 * @param DescriptionInterface[] $descriptions
 	 * @param string $dir
 	 */
-	public function unzipping(string $caches, string $dir) : void{
+	public function unzipping(string $descriptions, string $dir) : void{
+		foreach($descriptions as $description){
 
+		}
 	}
 
 	/**
@@ -96,17 +100,6 @@ class cli{
 				$this->getLogger()->info("looking ".$require);
 				$descriptions[] = $this->getApiDescription($require, $version);
 			}else{
-//				/**
-//				 * @var DescriptionInterface $class
-//				 */
-//				foreach([ShaDescription::class, BranchDescription::class] as $class){
-//					if(ShaDescription::CheckFormat($require, $version)){
-//						$descriptions[] = $class::init($require, $version);
-//					}else{
-//
-//					}
-//				}
-
 				switch(true){
 					case ShaDescription::CheckFormat($require, $version):
 						$descriptions[] = ShaDescription::init($require, $version);
@@ -169,10 +162,9 @@ class cli{
 
 	/**
 	 * @param DescriptionInterface[] $descriptions
-	 * @return list<string>
+	 * @return DescriptionInterface[]
 	 */
 	public function downloadZipball(array $descriptions) : array{
-		$caches = [];
 		$concurrentDirectory = $this->dir."cache".DIRECTORY_SEPARATOR;
 		$this->mkdir($concurrentDirectory);
 		foreach($descriptions as $description){
@@ -188,9 +180,9 @@ class cli{
 				$this->getLogger()->info("downloading ".$description->getGithubRepoName());
 				file_put_contents($cachefile, $this->getHttp()->getRawData($description->getGithubZipballurl()));
 			}
-			$caches[] = $cachefile;
+			$description->setCachePath($cachefile);
 		}
-		return $caches;
+		return $descriptions;
 	}
 
 	private function mkdir($targetDirectory) : void{

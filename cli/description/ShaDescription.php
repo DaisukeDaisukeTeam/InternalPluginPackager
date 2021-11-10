@@ -7,6 +7,7 @@ class ShaDescription implements DescriptionInterface{
 	public string $owner;
 	public string $repositoryName;
 	public string $commitsha;
+	public ?string $cachePath;
 
 	/**
 	 * @param string $owner
@@ -49,6 +50,14 @@ class ShaDescription implements DescriptionInterface{
 
 	public function getCacheName() : string{
 		return substr($this->getGithubCommitsha(), 0, 20);
+	}
+
+	public function getCachePath() : ?string{
+		return $this->cachePath;
+	}
+
+	public function setCachePath(?string $cachePath) : void{
+		$this->cachePath = $cachePath;
 	}
 
 	public static function CheckFormat(string $require, string $version) : bool{

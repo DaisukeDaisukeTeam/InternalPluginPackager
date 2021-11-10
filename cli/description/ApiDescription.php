@@ -4,6 +4,7 @@ namespace cli\description;
 
 class ApiDescription implements DescriptionInterface{
 	public array $data;
+	public ?string $cachePath;
 
 	public function __construct(array $data){
 		$this->data = $data;
@@ -39,11 +40,23 @@ class ApiDescription implements DescriptionInterface{
 		return substr($this->getGithubCommitsha(), 0, 10);
 	}
 
+	public function getCachePath() : ?string{
+		return $this->cachePath;
+	}
+
+	public function setCachePath(?string $cachePath) : void{
+		$this->cachePath = $cachePath;
+	}
+
 	public static function CheckFormat(string $require, string $version) : bool{
 		// TODO: Implement CheckFormat() method.
 	}
 
 	public static function init(string $require, string $version) : static{
 		// TODO: Implement init() method.
+	}
+
+	public function getVersion() : string{
+		// TODO: Implement getVersion() method.
 	}
 }

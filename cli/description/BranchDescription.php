@@ -7,6 +7,7 @@ class BranchDescription implements DescriptionInterface{
 	public string $owner;
 	public string $repositoryName;
 	public string $version;
+	public ?string $cachePath;
 
 	/**
 	 * @param string $owner
@@ -50,6 +51,14 @@ class BranchDescription implements DescriptionInterface{
 
 	public function getCacheName() : string{
 		return $this->getVersion();
+	}
+
+	public function getCachePath() : ?string{
+		return $this->cachePath;
+	}
+
+	public function setCachePath(?string $cachePath) : void{
+		$this->cachePath = $cachePath;
 	}
 
 	public static function CheckFormat(string $require, string $version) : bool{
