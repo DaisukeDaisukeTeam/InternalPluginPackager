@@ -4,32 +4,51 @@ namespace cli\description;
 
 class ShaDescription implements DescriptionInterface{
 
+	public string $owner;
+	public string $repositoryName;
+	public string $commitsha;
+
+	/**
+	 * @param string $owner
+	 * @param string $repositoryName
+	 * @param ?string $commitsha
+	 */
+	public function __construct(string $owner, string $repositoryName, ?string $commitsha = null){
+		$this->owner = $owner;
+		$this->repositoryName = $repositoryName;
+		$this->commitsha = $commitsha;
+	}
+
 	public function getGithubRepoName() : string{
-		// TODO: Implement getGithubRepoName() method.
+		return $this->owner.'/'.$this->repositoryName;
 	}
 
 	public function getName() : string{
-		// TODO: Implement getName() method.
+		return $this->repositoryName;
 	}
 
 	public function getGithubCommitsha() : ?string{
-		// TODO: Implement getGithubCommitsha() method.
+		return $this->commitsha;
 	}
 
 	public function getGithubZipballurl() : string{
-		// TODO: Implement getGithubZipballurl() method.
+		return "https://github.com/".$this->getGithubRepoName()."/archive/".$this->getGithubCommitsha().".zip";
 	}
 
-	public function getManifestContentsUrl() : string{
-		// TODO: Implement getManifestContentsUrl() method.
+	public function getManifestContents() : string{
+		//$url = "/repos/".$this->getGithubRepoName()."/contents/.poggit.yml";
 	}
 
 	public function getUrlVersion() : ?string{
-		// TODO: Implement getUrlVersion() method.
+		return null;
+	}
+
+	public function getVersion() : string{
+		return $this->getGithubCommitsha();
 	}
 
 	public function getCacheName() : string{
-		// TODO: Implement getCacheName() method.
+		return substr($this->getGithubCommitsha(), 0, 20);
 	}
 
 	public static function CheckFormat(string $require, string $version) : bool{
@@ -37,6 +56,7 @@ class ShaDescription implements DescriptionInterface{
 	}
 
 	public static function init(string $require, string $version) : static{
-		// TODO: Implement init() method.
+		$array = explode("/", $require);
+		return new self($array[0], $array[1], $version);
 	}
 }

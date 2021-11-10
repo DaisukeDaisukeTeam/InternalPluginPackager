@@ -11,9 +11,11 @@ interface DescriptionInterface{
 
 	public function getGithubZipballurl() : string;
 
-	public function getManifestContentsUrl() : string;
+	public function getManifestContents() : string;
 
 	public function getUrlVersion() : ?string;
+
+	public function getVersion() : string;
 
 	public function getCacheName() : string;
 

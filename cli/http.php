@@ -7,13 +7,21 @@ class http{
 
 	private array $cache = [];
 	private string $cachefile;
+	private string $cachefile1;
 	private bool $cachechanged = false;
 	private string|null|false $token;
+
+	private array $runtimeGithubCache = [];
 
 	public function __construct(string $cachedir){
 		$this->cachefile = $cachedir.DIRECTORY_SEPARATOR."cache.json";
 		if(file_exists($this->cachefile)){
 			$this->cache = json_decode(file_get_contents($this->cachefile), true, 512, JSON_THROW_ON_ERROR);
+		}
+
+		$this->cachefile1 = $cachedir.DIRECTORY_SEPARATOR."github_cache.json";
+		if(file_exists($this->cachefile1)){
+			$this->runtimeGithubCache = json_decode(file_get_contents($this->cachefile1), true, 512, JSON_THROW_ON_ERROR);
 		}
 
 		$this->token = trim(shell_exec("composer config --global github-oauth.github.com"));
@@ -24,6 +32,8 @@ class http{
 			return;
 		}
 		file_put_contents($this->cachefile, json_encode($this->cache, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+		file_put_contents($this->cachefile1, json_encode($this->runtimeGithubCache, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+
 		$this->cachechanged = false;
 	}
 
@@ -89,9 +99,12 @@ class http{
 	/**
 	 * @throws \JsonException
 	 */
-	public function get(string $url, $data = false, $request = false, string $github_token = "testtoken") : array{
-		$return = $this->getRawData($url, $data, $request, $github_token);
-		return json_decode($return, true, 512, JSON_THROW_ON_ERROR);
+	public function get(string $url, $data = false, $request = false) : array{
+		if(!isset($this->runtimeGithubCache[$url])){
+			$this->runtimeGithubCache[$url] = $this->getRawData($url, $data, $request);
+		}
+		$this->cachechanged = true;
+		return json_decode($this->runtimeGithubCache[$url], true, 512, JSON_THROW_ON_ERROR);
 	}
 
 	public function search(string $plugin_name, bool $force = false) : array{

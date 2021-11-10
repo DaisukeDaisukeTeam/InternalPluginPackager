@@ -1,8 +1,9 @@
 <?php
 
 use cli\description\ApiDescription;
+use cli\description\BranchDescription;
 use cli\description\DescriptionInterface;
-use cli\description\UrlDescription;
+use cli\description\ShaDescription;
 use cli\http;
 use cli\SimpleLogger;
 
@@ -55,10 +56,12 @@ class cli{
 			$version = $argv[3] ?? null;
 			$plugins = $this->requirePlugin($require, $version);
 			$descriptions = $this->LookingPlugins($plugins);
-			exit();
-			$caches = $this->downloadZipball($descriptions);
-			$caches;
 			var_dump($descriptions);
+			$caches = $this->downloadZipball($descriptions);
+			var_dump($caches);
+
+			$this->getHttp()->writeCache();
+
 			return;
 		}
 	}
@@ -88,14 +91,36 @@ class cli{
 			https://github.com/pmmp/PocketMine-MP/releases/latest/download/PocketMine-MP.phar
 			multiworld
 			*/
-			if(preg_match('/^[0-9a-f]{40}$/', $branch_version)){
-				$descriptions[] = new UrlDescription($owner, $repositoryName, null, $branch_version);
-			}else{
-				$descriptions[] = new UrlDescription($owner, $repositoryName, $branch_version);
-			}
+
 			if(preg_match('/^[a-zA-Z0-9]*$/', $require)){
 				$this->getLogger()->info("looking ".$require);
 				$descriptions[] = $this->getApiDescription($require, $version);
+			}else{
+//				/**
+//				 * @var DescriptionInterface $class
+//				 */
+//				foreach([ShaDescription::class, BranchDescription::class] as $class){
+//					if(ShaDescription::CheckFormat($require, $version)){
+//						$descriptions[] = $class::init($require, $version);
+//					}else{
+//
+//					}
+//				}
+
+				switch(true){
+					case ShaDescription::CheckFormat($require, $version):
+						$descriptions[] = ShaDescription::init($require, $version);
+						break;
+					default://branch
+						$branches = $this->getHttp()->get("https://api.github.com/repos/".$require."/branches");
+						foreach($branches as $index => $array){
+							if($array["name"] === $version){
+								$version = $array["commit"]["sha"];//commit sha
+							}
+						}
+						$descriptions[] = ShaDescription::init($require, $version);
+						break;
+				}
 			}
 		}
 		return $descriptions;
@@ -151,7 +176,14 @@ class cli{
 		$concurrentDirectory = $this->dir."cache".DIRECTORY_SEPARATOR;
 		$this->mkdir($concurrentDirectory);
 		foreach($descriptions as $description){
-			$cachefile = $concurrentDirectory.$description->getName()."_".$description->getCacheName().".zip";
+			$cachefile = $description->getName()."-".$description->getCacheName().".zip";
+			$cachefile = preg_replace("/[^a-zA-Z0-9.]/", "-", $cachefile);
+			if(!is_string($cachefile)){
+				var_dump($cachefile);
+				throw new LogicException("cachefile is not string");
+			}
+			$cachefile = $concurrentDirectory.$cachefile;
+
 			if(!file_exists($cachefile)){
 				$this->getLogger()->info("downloading ".$description->getGithubRepoName());
 				file_put_contents($cachefile, $this->getHttp()->getRawData($description->getGithubZipballurl()));
@@ -178,16 +210,19 @@ class cli{
 
 			$repo = $owner."/".$repositoryName;
 
-			if($branch_version === ""){
-				$this->getLogger()->info("looking ".$owner."/".$repositoryName);
-			}else{
-				$this->getLogger()->info("looking ".$owner."/".$repositoryName." ".$branch_version);
+			if($branch_version === "latest"){
+				throw new \RuntimeException("latest release tag not supported.");
 			}
 
 			$branches = $this->getHttp()->get("https://api.github.com/repos/".$repo."/branches");
+			if(!isset($branches[0]["name"])){
+				throw new \RuntimeException("The response from Github is incorrect.");
+			}
 			$branches = array_flip(array_column($branches, "name"));
 
 			if($branch_version === ""){
+				$this->getLogger()->info("selected branch: ".$branch_version);
+				$this->getLogger()->info("looking ".$owner."/".$repositoryName);
 				$this->getLogger()->info("getting branch information...");
 				$result = $this->getHttp()->get("/repos/".$repo);
 				if(!isset($result["default_branch"])){
@@ -195,53 +230,42 @@ class cli{
 				}
 
 				if(!$this->hasOption("-D", "--no-dialog")){
-					if(!isset($branches[0]["name"])){
-						throw new \RuntimeException("The response from Github is incorrect.");
-					}
-
-					foreach($branches as $index => $name){
-						$this->getLogger()->info($index.") ".$name);
+					foreach($branches as $name => $index){
+						$this->getLogger()->info("[".$name."]: ".$index);
 					}
 					$input = "";
 					do{
-						$input = $this->getLogger()->requestInput("branch [".$result["default_branch"]."]: ");
-						if(!isset($branches[$input])){
-							$this->getLogger()->info("branch ".$input." is not found.");
+						$input = 2;//$this->getLogger()->requestInput("branch [".$result["default_branch"]."/".$branches[$result["default_branch"]]."]: ");
+						if(isset($branches[$input])){
+							$branch_version = $input;
+						}elseif(($search = array_search($input, $branches, true)) !== false){
+							$branch_version = $search;
+						}else{
+							$branch_version = $result["default_branch"];
 						}
 					}while(false);
-
-					$branch_version = $input;
+					$this->getLogger()->info("selected branch: ".$branch_version);
 				}else{
 					$branch_version = $result["default_branch"];
-					$this->getLogger()->info("selected branch: ".$branch_version);
 				}
-				$plugins["require"][$owner."/".$repositoryName] = $branch_version;
-				return $plugins;
 			}
 
-			if($branch_version === "latest"){
-				throw new \RuntimeException("latest release tag not supported.");
+			/**
+			 * @var DescriptionInterface $class
+			 */
+			foreach([ShaDescription::class, BranchDescription::class] as $class){
+				if($class::CheckFormat($repo, $branch_version)){
+					$description = $class::init($repo, $branch_version);
+					$plugins["require"][$description->getGithubRepoName()] = $description->getVersion();
+					return $plugins;
+				}
 			}
-
-			if(preg_match('/^[0-9a-f]{40}$/', $branch_version)){
-				$descriptions[] = new UrlDescription($owner, $repositoryName, null, $branch_version);
-				$plugins["require"][$owner."/".$repositoryName] = $branch_version;
-				return $plugins;
-			}
-			if(isset($branches[""])){
-
-			}
-			$plugins["require"][$owner."/".$repositoryName] = $branch_version;
-			return $plugins;
 		}elseif(preg_match('/^[a-zA-Z0-9]*$/', $plugin)){
-			$this->getLogger()->info("looking ".$plugin);
 			$plugins["require"][$plugin] = "*";
-			//$descriptions[] = $this->getApiDescription($require, $version);
-		}else{
-			$this->getLogger()->error($plugin." is an invalid name. skipped.");
 		}
 		$this->getLogger()->info("updated plugins.json");
-		return $plugins;
+		//return $plugins;
+		throw new LogicException("requirePlugin: unknown format.");
 	}
 
 	public function readManifest() : array{

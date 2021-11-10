@@ -41,7 +41,7 @@ class UrlDescription implements DescriptionInterface{
 		return "/repos/".$this->getGithubRepoName()."/zipball/".$this->getUrlVersion();
 	}
 
-	public function getManifestContentsUrl() : string{
+	public function getManifestContents() : string{
 		///repos/{owner}/{repo}/contents/{path}
 		return "/repos/".$this->getGithubRepoName()."/contents/poggit.yml";
 	}

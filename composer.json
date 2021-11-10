@@ -1,7 +1,7 @@
 {
   "name": "daisukedaisuke/internal-plugin-packager",
   "require": {
-    "pocketmine/pocketmine-mp": "4.0.0-BETA8",
+    "pocketmine/pocketmine-mp": "4.0.0-BETA12",
     "ext-curl": "*"
   },
   "license": "LGPL-3.0",
