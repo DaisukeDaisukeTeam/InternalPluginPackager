@@ -1,6 +1,6 @@
 <?php
 
-namespace cli\interface;
+namespace cli\description;
 
 interface DescriptionInterface{
 	public function getGithubRepoName() : string;
@@ -16,4 +16,8 @@ interface DescriptionInterface{
 	public function getUrlVersion() : ?string;
 
 	public function getCacheName() : string;
+
+	public static function CheckFormat(string $require, string $version) : bool;
+
+	public static function init(string $require, string $version) : static;
 }

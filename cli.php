@@ -1,10 +1,10 @@
 <?php
 
-use cli\ApiDescription;
+use cli\description\ApiDescription;
+use cli\description\DescriptionInterface;
+use cli\description\UrlDescription;
 use cli\http;
-use cli\interface\DescriptionInterface;
 use cli\SimpleLogger;
-use cli\UrlDescription;
 
 $dir = __DIR__.DIRECTORY_SEPARATOR;
 
@@ -16,6 +16,8 @@ class cli{
 	public SimpleLogger $logger;
 	public http $http;
 	public string $dir;
+	/** @var string[] */
+	private array $option = [];
 
 	/**
 	 * @throws JsonException
@@ -44,14 +46,29 @@ class cli{
 				$this->getLogger()->info('usage: cli.php require https://github.com/DaisukeDaisukeTeam/BuyLand/tree/test');
 				return;
 			}
+
+			if(isset($argv[4])){
+				$this->option = array_flip(array_slice($argv, 4));
+			}
+
 			$require = $argv[2];
 			$version = $argv[3] ?? null;
 			$plugins = $this->requirePlugin($require, $version);
 			$descriptions = $this->LookingPlugins($plugins);
-			$this->downloadZipball($descriptions);
+			exit();
+			$caches = $this->downloadZipball($descriptions);
+			$caches;
 			var_dump($descriptions);
 			return;
 		}
+	}
+
+	/**
+	 * @param list<string> $caches
+	 * @param string $dir
+	 */
+	public function unzipping(string $caches, string $dir) : void{
+
 	}
 
 	/**
@@ -71,57 +88,14 @@ class cli{
 			https://github.com/pmmp/PocketMine-MP/releases/latest/download/PocketMine-MP.phar
 			multiworld
 			*/
-			if(preg_match('/^http[s]?\:\/\/github\.com\/([^\/\n_]*)\/([^\/\n_]*)\/?(tree|blob|releases\/tag|releases)?\/?([^\/\n_]*)?\/?/', $require, $m)){
-				[$match, $owner, $repositoryName, $identifier, $branch_version] = $m;
-
-				if($branch_version === ""){
-					$this->getLogger()->info("looking ".$owner."/".$repositoryName." latest");
-				}else{
-					$this->getLogger()->info("looking ".$owner."/".$repositoryName." ".$branch_version);
-				}
-
-				if($branch_version === ""){
-					$this->getLogger()->info("search default branch...");
-					$result = $this->getHttp()->get("/repos/CzechPMDevs/MultiWorld");
-					if(!isset($result["default_branch"])){
-						throw new \RuntimeException("github api default_branch not found.");
-					}
-					$branch_version = $result["default_branch"];
-					$this->getLogger()->info("selected branch: ".$branch_version);
-				}
-
-				if($branch_version === "latest"){
-					throw new \RuntimeException("latest not supported.");
-				}
-
-				if(preg_match('/^[0-9a-f]{40}$/', $branch_version)){
-					$descriptions[] = new UrlDescription($owner, $repositoryName, null, $branch_version);
-				}else{
-					$descriptions[] = new UrlDescription($owner, $repositoryName, $branch_version);
-				}
-
-				/*else{
-					$branch = $this->getHttp()->get("/repo/".$owner."/".$repositoryName."/git/refs/heads/".$branch_version);
-					if(!isset($branch["object"]["sha"])){
-						throw new \RuntimeException("github api request falled.");
-					}
-					$descriptions[] = new UrlDescription($owner, $repositoryName, $branch["object"]["sha"]);
-				}*/
-
-				/*elseif($identifier === "releases/tag"||$identifier === "releases"){
-//					if($branch_version === "latest"){
-//
-//					}else{
-//						//tags
-//						$this->getHttp()->get("/repo/".$owner."/".$repositoryName."/git/refs/tags/".);
-//					}
-
-				}*/
-			}elseif(preg_match('/^[a-zA-Z0-9]*$/', $require)){
+			if(preg_match('/^[0-9a-f]{40}$/', $branch_version)){
+				$descriptions[] = new UrlDescription($owner, $repositoryName, null, $branch_version);
+			}else{
+				$descriptions[] = new UrlDescription($owner, $repositoryName, $branch_version);
+			}
+			if(preg_match('/^[a-zA-Z0-9]*$/', $require)){
 				$this->getLogger()->info("looking ".$require);
 				$descriptions[] = $this->getApiDescription($require, $version);
-			}else{
-				$this->getLogger()->error($require." is an invalid name. skipped.");
 			}
 		}
 		return $descriptions;
@@ -170,27 +144,102 @@ class cli{
 
 	/**
 	 * @param DescriptionInterface[] $descriptions
+	 * @return list<string>
 	 */
-	public function downloadZipball(array $descriptions) : void{
+	public function downloadZipball(array $descriptions) : array{
+		$caches = [];
 		$concurrentDirectory = $this->dir."cache".DIRECTORY_SEPARATOR;
-		if(!is_dir($concurrentDirectory)){
-			if(!mkdir($concurrentDirectory, 755)&&!is_dir($concurrentDirectory)){
-				throw new \RuntimeException(sprintf('Directory "%s" was not created', $concurrentDirectory));
-			}
-		}
+		$this->mkdir($concurrentDirectory);
 		foreach($descriptions as $description){
-			$cachedir = $concurrentDirectory.$description->getName()."_".$description->getCacheName().".zip";
-			if(!file_exists($cachedir)){
+			$cachefile = $concurrentDirectory.$description->getName()."_".$description->getCacheName().".zip";
+			if(!file_exists($cachefile)){
 				$this->getLogger()->info("downloading ".$description->getGithubRepoName());
-				file_put_contents($cachedir, $this->getHttp()->getRawData($description->getGithubZipballurl()));
+				file_put_contents($cachefile, $this->getHttp()->getRawData($description->getGithubZipballurl()));
 			}
+			$caches[] = $cachefile;
 		}
+		return $caches;
+	}
 
+	private function mkdir($targetDirectory) : void{
+		if(is_dir($targetDirectory)){
+			return;
+		}
+		if(!mkdir($targetDirectory, 755)&&!is_dir($targetDirectory)){
+			throw new \RuntimeException(sprintf('Directory "%s" was not created', $targetDirectory));
+		}
 	}
 
 	public function requirePlugin(string $plugin, ?string $version = null) : array{
 		$plugins = $this->readManifest();
-		$plugins["require"][$plugin] = $version ?? "*";
+
+		if($this->validateGithubUrl($plugin, $m)){
+			[$match, $owner, $repositoryName, $identifier, $branch_version] = $m;
+
+			$repo = $owner."/".$repositoryName;
+
+			if($branch_version === ""){
+				$this->getLogger()->info("looking ".$owner."/".$repositoryName);
+			}else{
+				$this->getLogger()->info("looking ".$owner."/".$repositoryName." ".$branch_version);
+			}
+
+			$branches = $this->getHttp()->get("https://api.github.com/repos/".$repo."/branches");
+			$branches = array_flip(array_column($branches, "name"));
+
+			if($branch_version === ""){
+				$this->getLogger()->info("getting branch information...");
+				$result = $this->getHttp()->get("/repos/".$repo);
+				if(!isset($result["default_branch"])){
+					throw new \RuntimeException("github api default_branch not found.");
+				}
+
+				if(!$this->hasOption("-D", "--no-dialog")){
+					if(!isset($branches[0]["name"])){
+						throw new \RuntimeException("The response from Github is incorrect.");
+					}
+
+					foreach($branches as $index => $name){
+						$this->getLogger()->info($index.") ".$name);
+					}
+					$input = "";
+					do{
+						$input = $this->getLogger()->requestInput("branch [".$result["default_branch"]."]: ");
+						if(!isset($branches[$input])){
+							$this->getLogger()->info("branch ".$input." is not found.");
+						}
+					}while(false);
+
+					$branch_version = $input;
+				}else{
+					$branch_version = $result["default_branch"];
+					$this->getLogger()->info("selected branch: ".$branch_version);
+				}
+				$plugins["require"][$owner."/".$repositoryName] = $branch_version;
+				return $plugins;
+			}
+
+			if($branch_version === "latest"){
+				throw new \RuntimeException("latest release tag not supported.");
+			}
+
+			if(preg_match('/^[0-9a-f]{40}$/', $branch_version)){
+				$descriptions[] = new UrlDescription($owner, $repositoryName, null, $branch_version);
+				$plugins["require"][$owner."/".$repositoryName] = $branch_version;
+				return $plugins;
+			}
+			if(isset($branches[""])){
+
+			}
+			$plugins["require"][$owner."/".$repositoryName] = $branch_version;
+			return $plugins;
+		}elseif(preg_match('/^[a-zA-Z0-9]*$/', $plugin)){
+			$this->getLogger()->info("looking ".$plugin);
+			$plugins["require"][$plugin] = "*";
+			//$descriptions[] = $this->getApiDescription($require, $version);
+		}else{
+			$this->getLogger()->error($plugin." is an invalid name. skipped.");
+		}
 		$this->getLogger()->info("updated plugins.json");
 		return $plugins;
 	}
@@ -226,6 +275,22 @@ class cli{
 	 */
 	public function getHttp() : http{
 		return $this->http;
+	}
+
+	public function validateGithubUrl(string $url, array &$match = null) : bool{
+		return preg_match('/^http[s]?\:\/\/github\.com\/([^\/\n_]*)\/([^\/\n_]*)\/?(tree|blob|releases\/tag|releases)?\/?([^\/\n_]*)?\/?/', $url, $match);
+	}
+
+	/**
+	 * @param string[] $value
+	 */
+	public function hasOption(string ...$value) : bool{
+		foreach($value as $item){
+			if(isset($this->option[$item])){
+				return true;
+			}
+		}
+		return false;
 	}
 }
 

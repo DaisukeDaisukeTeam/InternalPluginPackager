@@ -7,6 +7,12 @@ class SimpleLogger{
 		echo $message.PHP_EOL;
 	}
 
+	public function requestInput(string $message) : string{
+		echo $message;
+		return trim(fgets(STDIN));
+
+	}
+
 	public function error(string $message) : void{
 		echo $message.PHP_EOL;
 	}

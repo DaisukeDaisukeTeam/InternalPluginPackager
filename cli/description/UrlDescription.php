@@ -1,8 +1,6 @@
 <?php
 
-namespace cli;
-
-use cli\interface\DescriptionInterface;
+namespace cli\description;
 
 class UrlDescription implements DescriptionInterface{
 	public string $owner;
@@ -59,4 +57,11 @@ class UrlDescription implements DescriptionInterface{
 //	protected function getBranchVersion() : string{
 //		return $this->branch_version;
 //	}
+	public static function CheckFormat(string $require, string $version) : bool{
+		// TODO: Implement CheckFormat() method.
+	}
+
+	public static function init(string $require, string $version) : static{
+		// TODO: Implement init() method.
+	}
 }

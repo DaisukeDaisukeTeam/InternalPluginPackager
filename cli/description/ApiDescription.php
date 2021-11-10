@@ -1,8 +1,6 @@
 <?php
 
-namespace cli;
-
-use cli\interface\DescriptionInterface;
+namespace cli\description;
 
 class ApiDescription implements DescriptionInterface{
 	public array $data;
@@ -39,5 +37,13 @@ class ApiDescription implements DescriptionInterface{
 
 	public function getCacheName() : string{
 		return substr($this->getGithubCommitsha(), 0, 10);
+	}
+
+	public static function CheckFormat(string $require, string $version) : bool{
+		// TODO: Implement CheckFormat() method.
+	}
+
+	public static function init(string $require, string $version) : static{
+		// TODO: Implement init() method.
 	}
 }
