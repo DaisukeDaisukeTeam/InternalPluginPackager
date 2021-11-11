@@ -37,7 +37,7 @@ class BranchDescription implements DescriptionInterface{
 		return "/repos/".$this->getGithubRepoName()."/zipball/".$this->getUrlVersion();
 	}
 
-	public function getManifestContents() : string{
+	public function getManifestPath() : string{
 		//return "/repos/".$this->getGithubRepoName()."/contents/poggit.yml?ref=".$this->getUrlVersion();
 	}
 

@@ -5,7 +5,12 @@ use cli\description\BranchDescription;
 use cli\description\DescriptionInterface;
 use cli\description\ShaDescription;
 use cli\http;
+use cli\ManifestDescription;
 use cli\SimpleLogger;
+
+ini_set('xdebug.var_display_max_children', -1);
+ini_set('xdebug.var_display_max_data', -1);
+ini_set('xdebug.var_display_max_depth', -1);
 
 $dir = __DIR__.DIRECTORY_SEPARATOR;
 
@@ -59,10 +64,10 @@ class cli{
 			var_dump($descriptions);
 			$descriptions = $this->downloadZipball($descriptions);
 			var_dump($descriptions);
+			$manifestDescriptions = $this->analyzeManifest($descriptions);
+			$this->requireLibrary($manifestDescriptions);
 
-			$this->unzipping();
-
-			$this->getHttp()->writeCache();
+			//$this->getHttp()->writeCache();
 
 			return;
 		}
@@ -70,11 +75,45 @@ class cli{
 
 	/**
 	 * @param DescriptionInterface[] $descriptions
+	 * @return ManifestDescription[]
+	 */
+	public function analyzeManifest(array $descriptions) : array{
+		$result = [];
+		foreach($descriptions as $description){
+			$name = $description->getName();
+			$path = $description->getManifestPath();
+			if(!file_exists($path)){
+				throw new \RuntimeException("manifest file ".$path." not found.");
+			}
+			$manifest = yaml_parse(file_get_contents($path));
+
+			var_dump($path, $manifest);
+			$projectPath = $manifest["path"];
+			foreach($manifest["projects"] as $projectName => $project){
+				if($name !== $projectName){
+					continue;
+//					$result[$name] = new ManifestDescription($manifest);
+//					break;
+				}
+				$libs = $project["libs"] ?? [];
+				foreach($libs as $libraryName => $array){
+					$library = $array["src"];
+					$version = $array["version"] ?? "*";
+					$branch = $array["branch"] ?? ":default";
+
+				}
+			}
+		}
+		return $result;
+	}
+
+	/**
+	 * @param DescriptionInterface[] $descriptions
 	 * @param string $dir
 	 */
 	public function unzipping(string $descriptions, string $dir) : void{
-		foreach($descriptions as $description){
-
+		foreach(new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator("phar://".__DIR__."/MultiWorld-26b23030957967722e95.zip/MultiWorld-26b23030957967722e959dd0fc1b883ed63b0b99/")) as $path => $file){
+			var_dump(substr(file_get_contents($path), 1000, 500));
 		}
 	}
 
@@ -308,6 +347,17 @@ class cli{
 		}
 		return false;
 	}
+
+//	/**
+//	 * @param ManifestDescription[] $manifestDescriptions
+//	 */
+//	public function requireLibrary(array $manifestDescriptions){
+//		foreach($manifestDescriptions as $projectName => $manifestDescription){
+//			foreach($manifestDescription->getLibs() as $libName => $array){
+//				$array["lists"]
+//			}
+//		}
+//	}
 }
 
 (new cli())->main($argv);

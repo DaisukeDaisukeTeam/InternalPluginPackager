@@ -27,7 +27,7 @@ class ApiDescription implements DescriptionInterface{
 		return "/repos/".$this->getGithubRepoName()."/zipball/".$this->getGithubCommitsha();
 	}
 
-	public function getManifestContents() : string{
+	public function getManifestPath() : string{
 		///repos/{owner}/{repo}/contents/{path}
 		return "/repos/".$this->getGithubRepoName()."/contents/poggit.yml";
 	}

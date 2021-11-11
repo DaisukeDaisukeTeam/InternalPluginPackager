@@ -11,7 +11,7 @@ interface DescriptionInterface{
 
 	public function getGithubZipballurl() : string;
 
-	public function getManifestContents() : string;
+	public function getManifestPath() : string;
 
 	public function getUrlVersion() : ?string;
 

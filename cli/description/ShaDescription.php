@@ -36,8 +36,13 @@ class ShaDescription implements DescriptionInterface{
 		return "https://github.com/".$this->getGithubRepoName()."/archive/".$this->getGithubCommitsha().".zip";
 	}
 
-	public function getManifestContents() : string{
-		//$url = "/repos/".$this->getGithubRepoName()."/contents/.poggit.yml";
+	public function getManifestPath() : string{
+		$cachedir = $this->getCachePath();
+		if($cachedir === null){
+			throw new \LogicException("\$this->getCacheName() === null");
+		}
+		var_dump($cachedir);
+		return "phar://".$cachedir."/".$this->getName()."-".$this->getGithubCommitsha()."/.poggit.yml";
 	}
 
 	public function getUrlVersion() : ?string{
