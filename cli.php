@@ -60,7 +60,7 @@ class cli{
 		}
 
 		if($argv[1] === "require"){
-			$this->option = self::getopt("nt:o:", ["no-dialog", "token:", "output"], $argv);
+			$this->option = self::getopt("nt:o:", ["no-dialog", "token:", "output:"], $argv);
 			if(count($argv) < 3){
 				$this->getLogger()->info('usage: cli.php require multiworld');
 				$this->getLogger()->info('usage: cli.php require https://github.com/DaisukeDaisukeTeam/BuyLand');
