@@ -3,7 +3,6 @@
 namespace cli\description;
 
 class ShaDescription extends DescriptionBase{
-
 	protected string $owner;
 	protected string $repositoryName;
 	protected string $commitsha;
@@ -36,13 +35,20 @@ class ShaDescription extends DescriptionBase{
 		return "https://github.com/".$this->getGithubRepoName()."/archive/".$this->getGithubCommitsha().".zip";
 	}
 
+	public function getPluginManifestPath() : string{
+		return $this->getRootPath()."/plugin.yml";
+	}
+
 	public function getManifestPath() : string{
+		return $this->getRootPath()."/.poggit.yml";
+	}
+
+	public function getRootPath() : string{
 		$cachedir = $this->getCachePath();
 		if($cachedir === null){
 			throw new \LogicException("\$this->getCacheName() === null");
 		}
-		var_dump($cachedir);
-		return "phar://".$cachedir."/".$this->getName()."-".$this->getGithubCommitsha()."/.poggit.yml";
+		return "phar://".$cachedir.DIRECTORY_SEPARATOR.$this->getName()."-".$this->getGithubCommitsha().DIRECTORY_SEPARATOR;
 	}
 
 	public function getUrlVersion() : ?string{

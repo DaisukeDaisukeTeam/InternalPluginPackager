@@ -27,9 +27,21 @@ class ApiDescription extends DescriptionBase{
 		return "/repos/".$this->getGithubRepoName()."/zipball/".$this->getGithubCommitsha();
 	}
 
+	public function getPluginManifestPath() : string{
+		return $this->getRootPath()."/plugin.yml";
+	}
+
 	public function getManifestPath() : string{
 		///repos/{owner}/{repo}/contents/{path}
 		return "/repos/".$this->getGithubRepoName()."/contents/poggit.yml";
+	}
+
+	public function getRootPath() : string{
+		$cachedir = $this->getCachePath();
+		if($cachedir === null){
+			throw new \LogicException("\$this->getCacheName() === null");
+		}
+		return "phar://".$cachedir.DIRECTORY_SEPARATOR.$this->getName()."-".$this->getGithubCommitsha().DIRECTORY_SEPARATOR;
 	}
 
 	public function getUrlVersion() : ?string{

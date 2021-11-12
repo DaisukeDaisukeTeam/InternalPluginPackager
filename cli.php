@@ -22,14 +22,23 @@ class cli{
 	public SimpleLogger $logger;
 	public http $http;
 	public string $dir;
+	public string $sourcedir;
+
 	/** @var string[] */
 	private array $option = [];
+	/** @var array<string, string> $libraries libraries index cache */
+	private array $libraries = [];
+	private bool $changeedLibraries = false;
 
 	/**
 	 * @throws JsonException
 	 */
 	public function __construct(){
 		$this->dir = getcwd().DIRECTORY_SEPARATOR;
+		$this->sourcedir = __DIR__.DIRECTORY_SEPARATOR;
+		if(Phar::running() !== ""){
+			$this->sourcedir = Phar::running().DIRECTORY_SEPARATOR;
+		}
 
 		$this->logger = new SimpleLogger();
 		$this->http = new http($this->dir);
@@ -66,8 +75,19 @@ class cli{
 			$descriptions = $this->downloadZipball($descriptions);
 			$this->getLogger()->info('scan libraries...');
 			$descriptions = $this->analyzeManifests($descriptions);
-			$this->getLogger()->info('download libraries...');
+			//$this->getLogger()->info('download libraries...');
+			if(file_exists($this->getCacheDir()."index.json")){
+				$this->libraries = json_decode(file_get_contents($this->getCacheDir()."libraries".DIRECTORY_SEPARATOR."index.json"), true, 512, JSON_THROW_ON_ERROR);
+			}
 			$this->requirelibraries($descriptions);
+			if($this->changeedLibraries){
+				file_put_contents($this->getCacheDir()."libraries".DIRECTORY_SEPARATOR."index.json", json_encode($this->libraries, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
+			}
+			$this->makePhars($descriptions);
+			var_dump($descriptions);
+
+			$this->packagingPhars($descriptions);
+
 
 			//$this->getHttp()->writeCache();
 
@@ -77,23 +97,149 @@ class cli{
 
 	/**
 	 * @param DescriptionBase[] $descriptions
+	 */
+	protected function packagingPhars(array $descriptions) : void{
+		$files = [];
+		foreach(new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($this->sourcedir."src")) as $path => $file){
+			if($file->isFile() === false) continue;
+			$files[str_replace(__DIR__, "", $path)] = $path;
+		}
+		$files["plugin.yml"] = $this->sourcedir."plugin.yml";
+		foreach($descriptions as $description){
+
+		}
+	}
+
+	/**
+	 * @param DescriptionBase[] $descriptions
+	 */
+	protected function makePhars(array $descriptions){
+		foreach($descriptions as $description){
+			$this->makePhar($description);
+		}
+	}
+
+	protected function makePhar(DescriptionBase $description) : void{
+		$this->getLogger()->info("making ".$description->getName().".phar ...");
+
+		$file_phar = $this->getCacheDir()."phar".DIRECTORY_SEPARATOR.$description->getName().".phar";
+		$this->mkdir(dirname($file_phar));
+		$description->setPharPath($file_phar);
+		if(file_exists($file_phar)){
+			//echo "Phar file already exists, overwriting...";
+			//echo PHP_EOL;
+			Phar::unlinkArchive($file_phar);
+		}
+
+		$files = [];
+		$dir = $description->getRootPath();
+
+		$exclusions = ["github", ".gitignore", "composer.json", "composer.lock", "build", ".git"];
+
+		foreach(new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir)) as $path => $file){
+			foreach($exclusions as $exclusion) if(str_contains($path, $exclusion)) continue 2;
+			if($file->isFile() === false) continue;
+			$files[str_replace($dir, "", $path)] = $path;
+		}
+		$phar = new Phar($file_phar, 0);
+		$phar->startBuffering();
+		$phar->setSignatureAlgorithm(\Phar::SHA1);
+		$phar->buildFromIterator(new \ArrayIterator($files));
+		$phar->setStub('<?php echo "build by custom builder v1.0";__HALT_COMPILER();');
+		$phar->compressFiles(Phar::GZ);
+		$phar->stopBuffering();
+
+		$main = $description->getMain();
+		$array = explode("\\", $main);
+		unset($array[array_key_last($array)]);
+		$namespace = implode("\\", $array);
+		switch($description->getType()){
+//			case DescriptionBase::TYPE_NORMAL:
+//				break;
+			case DescriptionBase::TYPE_LIBRARY:
+				foreach($description->getLibraryEntries() as $libraryEntry){
+					$this->getLogger()->info("> install library ".$libraryEntry->getName()." ...");
+					shell_exec(PHP_BINARY." ".escapeshellarg($libraryEntry->getPharPath())." ".escapeshellarg($file_phar)." ".escapeshellarg($namespace."\\"));
+				}
+				break;
+		}
+	}
+
+	/**
+	 * @param DescriptionBase[] $descriptions
 	 * @return DescriptionBase[]
 	 */
 	public function requirelibraries(array $descriptions) : array{
 		foreach($descriptions as $description){
+			if($description->getType() === DescriptionBase::TYPE_NORMAL){
+				continue;
+			}
 			$this->requireLibrary($description);
 		}
 		return $descriptions;
 	}
 
 	public function requireLibrary(DescriptionBase $description) : void{
-		foreach($description->getLibraryEntries() as $libraryEntry){
-			if(file_exists(getcwd()."library_downloader.php")){
-
-			}
-			$libraryEntry->get;
-			shell_exec(PHP_BINARY.escapeshellarg(""));
+		if(count($description->getLibraryEntries()) === 0){
+			return;
 		}
+
+		$escape_name = preg_replace("/[^a-zA-Z0-9]/", "-", $description->getName());
+		$cachedir = $this->getCacheDir()."libraries".DIRECTORY_SEPARATOR;//.$escape_name.DIRECTORY_SEPARATOR;
+		$this->mkdir($cachedir);
+		$tmpphar = $cachedir."tmp.phar";
+
+
+		$foundCache = true;
+		$this->getLogger()->info("downloading ".$description->getName()." libraries...");
+		foreach($description->getLibraryEntries() as $libraryEntry){
+			if(isset($this->libraries[$libraryEntry->getCacheName()])){
+				$phardir = $cachedir.$this->libraries[$libraryEntry->getCacheName()];
+				if(file_exists($phardir)){
+					$libraryEntry->setPharPath($phardir);
+					continue;
+				}
+			}
+			$this->getLogger()->info("downloading ".$libraryEntry->getName()." library...");
+
+			if(file_exists($tmpphar)){
+				unlink($tmpphar);
+			}
+
+			$tmpphar = $cachedir."libpmform_v1.phar";
+
+			$array = explode("/", trim($libraryEntry->getLibrary()));
+//			if(!copy(
+//				"https://poggit.pmmp.io/v.dl/".urlencode($array[0])."/".urlencode($array[1])."/".urlencode($array[2])."/".urlencode(trim($libraryEntry->getVersion()))."?branch=".urlencode(trim($libraryEntry->getBranch())),
+//				$tmpphar
+//			)){
+//				throw new RuntimeException("library downloader: copy falled.");
+//			}
+
+			if(!file_exists($tmpphar)){
+				throw new RuntimeException("library downloader: ".$tmpphar.": no such file or directory.");
+			}
+
+			$manifest = yaml_parse(file_get_contents("phar://".$tmpphar.DIRECTORY_SEPARATOR."virion.yml"));
+			$actualVersion = $manifest["version"];
+			$target = $libraryEntry->getName()."_v".strstr($actualVersion, ".", true).".phar";
+			rename($tmpphar, $cachedir.$target);
+			$libraryEntry->setPharPath($cachedir.$target);
+			$this->libraries[$libraryEntry->getCacheName()] = $target;
+			$this->changeedLibraries = true;
+			$foundCache = false;
+		}
+
+		if($foundCache === true){
+			return;
+		}
+
+		//$dir = getcwd().DIRECTORY_SEPARATOR."library_downloader.php";
+//		if(!file_exists($dir)){
+//			$this->getLogger()->info("downloading libraries downloader.");
+//			copy("https://raw.githubusercontent.com/poggit/devirion/master/cli.php", $dir);
+//		}
+		//shell_exec(PHP_BINARY." ".escapeshellarg($dir)." ".escapeshellarg("install")." ".escapeshellarg($description->getManifestPath())." ".escapeshellarg($description->getName())." ".escapeshellarg($this->getCacheDir()."libraries"));
 	}
 
 	/**
@@ -110,8 +256,18 @@ class cli{
 	public function analyzeManifest(DescriptionBase $description) : void{
 		$name = $description->getName();
 		$path = $description->getManifestPath();
+		$pluginManifestPath = $description->getPluginManifestPath();
+
+		if(!file_exists($pluginManifestPath)){
+			throw new \RuntimeException("plugin.yml(".$pluginManifestPath.") not found.");
+		}
+		$pluginManifest = yaml_parse(file_get_contents($description->getPluginManifestPath()));
+		$description->setMain($pluginManifest["main"]);
+
 		if(!file_exists($path)){
-			throw new \RuntimeException("manifest file ".$path." not found.");
+			$description->setType(DescriptionBase::TYPE_NORMAL);//github
+			return;
+			//throw new \RuntimeException("manifest file ".$path." not found.");
 		}
 		$manifest = yaml_parse(file_get_contents($path));
 		$description->setProjectPath($manifest["path"] ?? "");
@@ -126,7 +282,7 @@ class cli{
 				$library = $array["src"];
 				$version = $array["version"] ?? "*";
 				$branch = $array["branch"] ?? ":default";
-				$description->addLibraryEnty(new LibraryEntry($library, $version, $branch));
+				$description->addLibraryEnty(new LibraryEntry($libraryName, $library, $version, $branch));
 			}
 		}
 	}
@@ -228,7 +384,7 @@ class cli{
 	 * @return DescriptionBase[]
 	 */
 	public function downloadZipball(array $descriptions) : array{
-		$concurrentDirectory = $this->dir."cache".DIRECTORY_SEPARATOR;
+		$concurrentDirectory = $this->getCacheDir();
 		$this->mkdir($concurrentDirectory);
 		foreach($descriptions as $description){
 			$cachefile = $description->getName()."-".$description->getCacheName().".zip";
@@ -338,7 +494,6 @@ class cli{
 		if(file_exists($this->dir."plugins_cache.json")){
 			$cache = json_decode(file_get_contents($this->dir."plugins_cache.json"), true, 512, JSON_THROW_ON_ERROR);
 		}
-
 	}
 
 
@@ -370,6 +525,10 @@ class cli{
 			}
 		}
 		return false;
+	}
+
+	public function getCacheDir() : string{
+		return $this->dir."cache".DIRECTORY_SEPARATOR;
 	}
 
 //	/**

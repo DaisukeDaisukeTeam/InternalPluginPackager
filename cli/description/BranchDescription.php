@@ -70,4 +70,11 @@ class BranchDescription extends DescriptionBase{
 		return new self($array[0], $array[1], $version);
 	}
 
+	public function getPluginManifestPath() : string{
+		// TODO: Implement getPluginManifestPath() method.
+	}
+
+	public function getRootPath() : string{
+		// TODO: Implement getRootPath() method.
+	}
 }
