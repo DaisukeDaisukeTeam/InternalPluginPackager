@@ -2,12 +2,12 @@
 
 namespace cli\description;
 
-class ShaDescription implements DescriptionInterface{
+class ShaDescription extends DescriptionBase{
 
-	public string $owner;
-	public string $repositoryName;
-	public string $commitsha;
-	public ?string $cachePath;
+	protected string $owner;
+	protected string $repositoryName;
+	protected string $commitsha;
+	protected ?string $cachePath;
 
 	/**
 	 * @param string $owner

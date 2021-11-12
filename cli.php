@@ -2,10 +2,10 @@
 
 use cli\description\ApiDescription;
 use cli\description\BranchDescription;
-use cli\description\DescriptionInterface;
+use cli\description\DescriptionBase;
 use cli\description\ShaDescription;
 use cli\http;
-use cli\ManifestDescription;
+use cli\LibraryEntry;
 use cli\SimpleLogger;
 
 ini_set('xdebug.var_display_max_children', -1);
@@ -59,13 +59,15 @@ class cli{
 
 			$require = $argv[2];
 			$version = $argv[3] ?? null;
+			$this->getLogger()->info('looking plugins...');
 			$plugins = $this->requirePlugin($require, $version);
 			$descriptions = $this->LookingPlugins($plugins);
-			var_dump($descriptions);
+			$this->getLogger()->info('downloading plugins...');
 			$descriptions = $this->downloadZipball($descriptions);
-			var_dump($descriptions);
-			$manifestDescriptions = $this->analyzeManifest($descriptions);
-			$this->requireLibrary($manifestDescriptions);
+			$this->getLogger()->info('scan libraries...');
+			$descriptions = $this->analyzeManifests($descriptions);
+			$this->getLogger()->info('download libraries...');
+			$this->requirelibraries($descriptions);
 
 			//$this->getHttp()->writeCache();
 
@@ -74,41 +76,63 @@ class cli{
 	}
 
 	/**
-	 * @param DescriptionInterface[] $descriptions
-	 * @return ManifestDescription[]
+	 * @param DescriptionBase[] $descriptions
+	 * @return DescriptionBase[]
 	 */
-	public function analyzeManifest(array $descriptions) : array{
-		$result = [];
+	public function requirelibraries(array $descriptions) : array{
 		foreach($descriptions as $description){
-			$name = $description->getName();
-			$path = $description->getManifestPath();
-			if(!file_exists($path)){
-				throw new \RuntimeException("manifest file ".$path." not found.");
-			}
-			$manifest = yaml_parse(file_get_contents($path));
-
-			var_dump($path, $manifest);
-			$projectPath = $manifest["path"];
-			foreach($manifest["projects"] as $projectName => $project){
-				if($name !== $projectName){
-					continue;
-//					$result[$name] = new ManifestDescription($manifest);
-//					break;
-				}
-				$libs = $project["libs"] ?? [];
-				foreach($libs as $libraryName => $array){
-					$library = $array["src"];
-					$version = $array["version"] ?? "*";
-					$branch = $array["branch"] ?? ":default";
-
-				}
-			}
+			$this->requireLibrary($description);
 		}
-		return $result;
+		return $descriptions;
+	}
+
+	public function requireLibrary(DescriptionBase $description) : void{
+		foreach($description->getLibraryEntries() as $libraryEntry){
+			if(file_exists(getcwd()."library_downloader.php")){
+
+			}
+			$libraryEntry->get;
+			shell_exec(PHP_BINARY.escapeshellarg(""));
+		}
 	}
 
 	/**
-	 * @param DescriptionInterface[] $descriptions
+	 * @param DescriptionBase[] $descriptions
+	 * @return DescriptionBase[]
+	 */
+	public function analyzeManifests(array $descriptions) : array{
+		foreach($descriptions as $description){
+			$this->analyzeManifest($description);
+		}
+		return $descriptions;
+	}
+
+	public function analyzeManifest(DescriptionBase $description) : void{
+		$name = $description->getName();
+		$path = $description->getManifestPath();
+		if(!file_exists($path)){
+			throw new \RuntimeException("manifest file ".$path." not found.");
+		}
+		$manifest = yaml_parse(file_get_contents($path));
+		$description->setProjectPath($manifest["path"] ?? "");
+		foreach($manifest["projects"] as $projectName => $project){
+			if($name !== $projectName){
+				continue;
+//					$result[$name] = new LibraryEntry($manifest);
+//					break;
+			}
+			$libs = $project["libs"] ?? [];
+			foreach($libs as $libraryName => $array){
+				$library = $array["src"];
+				$version = $array["version"] ?? "*";
+				$branch = $array["branch"] ?? ":default";
+				$description->addLibraryEnty(new LibraryEntry($library, $version, $branch));
+			}
+		}
+	}
+
+	/**
+	 * @param DescriptionBase[] $descriptions
 	 * @param string $dir
 	 */
 	public function unzipping(string $descriptions, string $dir) : void{
@@ -120,7 +144,7 @@ class cli{
 	/**
 	 * @param mixed[] $plugins
 	 * @phpstan-param array<string, string> $plugins
-	 * @return DescriptionInterface[]
+	 * @return DescriptionBase[]
 	 */
 	public function LookingPlugins(array $plugins) : array{
 		$descriptions = [];
@@ -200,8 +224,8 @@ class cli{
 	}
 
 	/**
-	 * @param DescriptionInterface[] $descriptions
-	 * @return DescriptionInterface[]
+	 * @param DescriptionBase[] $descriptions
+	 * @return DescriptionBase[]
 	 */
 	public function downloadZipball(array $descriptions) : array{
 		$concurrentDirectory = $this->dir."cache".DIRECTORY_SEPARATOR;
@@ -282,7 +306,7 @@ class cli{
 			}
 
 			/**
-			 * @var DescriptionInterface $class
+			 * @var DescriptionBase $class
 			 */
 			foreach([ShaDescription::class, BranchDescription::class] as $class){
 				if($class::CheckFormat($repo, $branch_version)){
@@ -349,7 +373,7 @@ class cli{
 	}
 
 //	/**
-//	 * @param ManifestDescription[] $manifestDescriptions
+//	 * @param LibraryEntry[] $manifestDescriptions
 //	 */
 //	public function requireLibrary(array $manifestDescriptions){
 //		foreach($manifestDescriptions as $projectName => $manifestDescription){

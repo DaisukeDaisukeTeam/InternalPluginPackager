@@ -2,7 +2,7 @@
 
 namespace cli\description;
 
-class BranchDescription implements DescriptionInterface{
+class BranchDescription extends DescriptionBase{
 
 	public string $owner;
 	public string $repositoryName;

@@ -2,7 +2,7 @@
 
 namespace cli\description;
 
-class ApiDescription implements DescriptionInterface{
+class ApiDescription extends DescriptionBase{
 	public array $data;
 	public ?string $cachePath;
 
