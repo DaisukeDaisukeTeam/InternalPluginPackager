@@ -12,10 +12,14 @@ ini_set('xdebug.var_display_max_children', -1);
 ini_set('xdebug.var_display_max_data', -1);
 ini_set('xdebug.var_display_max_depth', -1);
 
-$dir = __DIR__.DIRECTORY_SEPARATOR;
 
+$dir = __DIR__.DIRECTORY_SEPARATOR;
+if(Phar::running() !== ""){
+	$dir = Phar::running().DIRECTORY_SEPARATOR;
+}
 spl_autoload_register(function($class) use ($dir){
-	include_once $dir.$class.'.php';
+	$file = str_replace("\\", "/", $class).'.php';
+	require $file;
 });
 
 class cli{
@@ -29,6 +33,7 @@ class cli{
 	/** @var array<string, string> $libraries libraries index cache */
 	private array $libraries = [];
 	private bool $changeedLibraries = false;
+	private string $output;
 
 	/**
 	 * @throws JsonException
@@ -55,6 +60,7 @@ class cli{
 		}
 
 		if($argv[1] === "require"){
+			$this->option = self::getopt("nt:o:", ["no-dialog", "token:", "output"], $argv);
 			if(count($argv) < 3){
 				$this->getLogger()->info('usage: cli.php require multiworld');
 				$this->getLogger()->info('usage: cli.php require https://github.com/DaisukeDaisukeTeam/BuyLand');
@@ -62,9 +68,9 @@ class cli{
 				return;
 			}
 
-			if(isset($argv[4])){
-				$this->option = array_flip(array_slice($argv, 4));
-			}
+			$this->output = $this->getOption("o", "output") ?? $this->dir."output.phar";
+
+			$this->getHttp()->initToken($this->getOption("t", "token"));
 
 			$require = $argv[2];
 			$version = $argv[3] ?? null;
@@ -76,16 +82,17 @@ class cli{
 			$this->getLogger()->info('scan libraries...');
 			$descriptions = $this->analyzeManifests($descriptions);
 			//$this->getLogger()->info('download libraries...');
-			if(file_exists($this->getCacheDir()."index.json")){
-				$this->libraries = json_decode(file_get_contents($this->getCacheDir()."libraries".DIRECTORY_SEPARATOR."index.json"), true, 512, JSON_THROW_ON_ERROR);
+
+			$cache = $this->getCacheDir()."libraries".DIRECTORY_SEPARATOR."index.json";
+			if(file_exists($cache)){
+				$this->libraries = json_decode(file_get_contents($cache), true, 512, JSON_THROW_ON_ERROR);
 			}
 			$this->requirelibraries($descriptions);
 			if($this->changeedLibraries){
-				file_put_contents($this->getCacheDir()."libraries".DIRECTORY_SEPARATOR."index.json", json_encode($this->libraries, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
+				file_put_contents($cache, json_encode($this->libraries, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
 			}
 			$this->makePhars($descriptions);
-			var_dump($descriptions);
-
+			$this->getLogger()->info('packaging plugin');
 			$this->packagingPhars($descriptions);
 
 
@@ -99,15 +106,40 @@ class cli{
 	 * @param DescriptionBase[] $descriptions
 	 */
 	protected function packagingPhars(array $descriptions) : void{
+		if(file_exists($this->output)){
+			//echo "Phar file already exists, overwriting...";
+			//echo PHP_EOL;
+			Phar::unlinkArchive($this->output);
+		}
 		$files = [];
 		foreach(new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($this->sourcedir."src")) as $path => $file){
 			if($file->isFile() === false) continue;
 			$files[str_replace(__DIR__, "", $path)] = $path;
 		}
-		$files["plugin.yml"] = $this->sourcedir."plugin.yml";
-		foreach($descriptions as $description){
 
+		$cachedir = $this->getCacheDir();
+
+		$files["plugin.yml"] = $this->sourcedir."resources/plugin.yml";
+		foreach($descriptions as $description){
+			$name = $description->getName();
+			$basePath = $description->getPharPath();
+			$resourceDir = "resources/plugins/".strtolower($description->getName());
+			foreach(new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($basePath)) as $path => $file){
+//				$tmp = $cachedir."tmp".DIRECTORY_SEPARATOR.$name.str_replace($basePath, "", $path);
+//				$this->mkdir(dirname($tmp));
+//				copy($path, $tmp);
+				$files[$resourceDir.str_replace($basePath, "", $path)] = $path;
+			}
 		}
+
+		$phar = new Phar($this->output, 0);
+		$phar->startBuffering();
+		$phar->setSignatureAlgorithm(\Phar::SHA1);
+		$phar->buildFromIterator(new \ArrayIterator($files));
+		$phar->setStub('<?php echo "build by custom builder v1.0";__HALT_COMPILER();');
+		//$phar->compressFiles(Phar::GZ);
+		$phar->stopBuffering();
+
 	}
 
 	/**
@@ -120,11 +152,11 @@ class cli{
 	}
 
 	protected function makePhar(DescriptionBase $description) : void{
-		$this->getLogger()->info("making ".$description->getName().".phar ...");
+		$this->getLogger()->info("making ".$description->getName().".phar");
 
 		$file_phar = $this->getCacheDir()."phar".DIRECTORY_SEPARATOR.$description->getName().".phar";
 		$this->mkdir(dirname($file_phar));
-		$description->setPharPath($file_phar);
+		$description->setPharPath("phar://".$file_phar);
 		if(file_exists($file_phar)){
 			//echo "Phar file already exists, overwriting...";
 			//echo PHP_EOL;
@@ -146,7 +178,7 @@ class cli{
 		$phar->setSignatureAlgorithm(\Phar::SHA1);
 		$phar->buildFromIterator(new \ArrayIterator($files));
 		$phar->setStub('<?php echo "build by custom builder v1.0";__HALT_COMPILER();');
-		$phar->compressFiles(Phar::GZ);
+		//$phar->compressFiles(Phar::GZ);
 		$phar->stopBuffering();
 
 		$main = $description->getMain();
@@ -158,7 +190,7 @@ class cli{
 //				break;
 			case DescriptionBase::TYPE_LIBRARY:
 				foreach($description->getLibraryEntries() as $libraryEntry){
-					$this->getLogger()->info("> install library ".$libraryEntry->getName()." ...");
+					$this->getLogger()->info("> install library ".$libraryEntry->getName());
 					shell_exec(PHP_BINARY." ".escapeshellarg($libraryEntry->getPharPath())." ".escapeshellarg($file_phar)." ".escapeshellarg($namespace."\\"));
 				}
 				break;
@@ -191,11 +223,12 @@ class cli{
 
 
 		$foundCache = true;
-		$this->getLogger()->info("downloading ".$description->getName()." libraries...");
+		$this->getLogger()->info("scanning ".$description->getName()." libraries cache");
 		foreach($description->getLibraryEntries() as $libraryEntry){
 			if(isset($this->libraries[$libraryEntry->getCacheName()])){
 				$phardir = $cachedir.$this->libraries[$libraryEntry->getCacheName()];
 				if(file_exists($phardir)){
+					$this->getLogger()->info("found ".$description->getName()." library cache.");
 					$libraryEntry->setPharPath($phardir);
 					continue;
 				}
@@ -206,11 +239,13 @@ class cli{
 				unlink($tmpphar);
 			}
 
-			$tmpphar = $cachedir."libpmform_v1.phar";
+			$tmpphar = $cachedir."test.phar";
 
 			$array = explode("/", trim($libraryEntry->getLibrary()));
+			$this->getHttp()->downloadLibrary($tmpphar, $array[0], $array[1], $array[2], $libraryEntry->getVersion(), $libraryEntry->getBranch());
+
 //			if(!copy(
-//				"https://poggit.pmmp.io/v.dl/".urlencode($array[0])."/".urlencode($array[1])."/".urlencode($array[2])."/".urlencode(trim($libraryEntry->getVersion()))."?branch=".urlencode(trim($libraryEntry->getBranch())),
+//				"https://poggit.pmmp.io/v.dl/".urlencode($array[0])."/".urlencode($array[0])."/".urlencode($array[0])."/".urlencode(trim($libraryEntry->getVersion()))."?branch=".urlencode(trim($libraryEntry->getBranch())),
 //				$tmpphar
 //			)){
 //				throw new RuntimeException("library downloader: copy falled.");
@@ -229,17 +264,6 @@ class cli{
 			$this->changeedLibraries = true;
 			$foundCache = false;
 		}
-
-		if($foundCache === true){
-			return;
-		}
-
-		//$dir = getcwd().DIRECTORY_SEPARATOR."library_downloader.php";
-//		if(!file_exists($dir)){
-//			$this->getLogger()->info("downloading libraries downloader.");
-//			copy("https://raw.githubusercontent.com/poggit/devirion/master/cli.php", $dir);
-//		}
-		//shell_exec(PHP_BINARY." ".escapeshellarg($dir)." ".escapeshellarg("install")." ".escapeshellarg($description->getManifestPath())." ".escapeshellarg($description->getName())." ".escapeshellarg($this->getCacheDir()."libraries"));
 	}
 
 	/**
@@ -408,7 +432,7 @@ class cli{
 		if(is_dir($targetDirectory)){
 			return;
 		}
-		if(!mkdir($targetDirectory, 755)&&!is_dir($targetDirectory)){
+		if(!mkdir($targetDirectory, 0755, true)&&!is_dir($targetDirectory)){
 			throw new \RuntimeException(sprintf('Directory "%s" was not created', $targetDirectory));
 		}
 	}
@@ -440,7 +464,7 @@ class cli{
 					throw new \RuntimeException("github api default_branch not found.");
 				}
 
-				if(!$this->hasOption("-D", "--no-dialog")){
+				if(!$this->hasOption("n", "no-dialog")){
 					foreach($branches as $name => $index){
 						$this->getLogger()->info("[".$name."]: ".$index);
 					}
@@ -527,20 +551,91 @@ class cli{
 		return false;
 	}
 
+	/**
+	 * @param string[] $value
+	 */
+	public function getOption(string ...$value) : ?string{
+		foreach($value as $item){
+			if(isset($this->option[$item])){
+				return $this->option[$item];
+			}
+		}
+		return null;
+	}
+
 	public function getCacheDir() : string{
 		return $this->dir."cache".DIRECTORY_SEPARATOR;
 	}
 
-//	/**
-//	 * @param LibraryEntry[] $manifestDescriptions
-//	 */
-//	public function requireLibrary(array $manifestDescriptions){
-//		foreach($manifestDescriptions as $projectName => $manifestDescription){
-//			foreach($manifestDescription->getLibs() as $libName => $array){
-//				$array["lists"]
-//			}
-//		}
-//	}
+	/**
+	 * @param string $short_options
+	 * @param list<string> $long_options
+	 * @param list<string> $argv
+	 * @return array<string, string>
+	 */
+	public static function getopt(string $short_options, array $long_options = [], array $argv = []) : array{
+		$result = [];
+		for($i = 1, $iMax = count($argv) - 1; $i <= $iMax; $i++){
+			$next_value = null;
+			$value = $argv[$i];
+			if(isset($argv[$i + 1])&&!str_starts_with($argv[$i + 1], "-")){
+				$next_value = $argv[$i + 1];
+			}
+
+			if(str_starts_with($value, "--")){
+				$target = substr($value, 2);
+				if(isset($result[$target])){
+					continue;
+				}
+				foreach($long_options as $long_option){
+					if(str_starts_with($long_option, $target)){
+						$operator = substr(strstr($long_option, ":"), 0, 2);
+						if($operator === "::"){
+							if($next_value === null){
+								$result[$target] = false;
+								continue;
+							}
+							$result[$target] = $next_value;
+							++$i;
+						}elseif($operator !== ""&&$operator[0] === ":"){
+							if($next_value === null){
+								continue;
+							}
+							$result[$target] = $next_value;
+							++$i;
+						}else{
+							$result[$target] = false;
+						}
+					}
+				}
+				continue;
+			}
+
+			if(str_starts_with($value, "-")){
+				if(isset($result[$value[1]])){
+					continue;
+				}
+				if(($str = strstr($short_options, $value[1])) !== false){
+					if(substr($str, 1, 2) === "::"){
+						if($next_value !== null){
+							$result[$value[1]] = $next_value;
+							++$i;
+						}else{
+							$result[$value[1]] = false;
+						}
+					}elseif(isset($str[1])&&$str[1] === ":"){
+						if($next_value === null){
+							continue;
+						}
+						$result[$value[1]] = $next_value;
+					}else{
+						$result[$value[1]] = false;
+					}
+				}
+			}
+		}
+		return $result;
+	}
 }
 
 (new cli())->main($argv);
