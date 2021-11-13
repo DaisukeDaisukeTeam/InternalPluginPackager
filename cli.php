@@ -62,7 +62,7 @@ class cli{
 			$this->echoVersion();
 			return;
 		}
-		$this->option = self::getopt("nt:o:", ["no-dialog", "token:", "output:"], $argv, $parameter, false, true, $unknownOptions);//["install", "require", "version"]
+		$this->option = self::getopt("nt:o:", ["no-manifest", "no-dialog", "token:", "output:"], $argv, $parameter, ["version", "install", "require"], true, $unknownOptions);//["install", "require", "version"]
 		if(count($parameter) === 0){
 			$this->getLogger()->info("usage: cli.php install|require|version");
 			return;
@@ -78,7 +78,7 @@ class cli{
 		}
 
 		if($parameter[0] === "require"){
-			if(count($parameter) < 3){
+			if(count($parameter) < 2){
 				$this->getLogger()->info('usage: cli.php require multiworld');
 				$this->getLogger()->info('usage: cli.php require https://github.com/DaisukeDaisukeTeam/BuyLand');
 				$this->getLogger()->info('usage: cli.php require https://github.com/DaisukeDaisukeTeam/BuyLand/tree/test');
@@ -89,8 +89,8 @@ class cli{
 
 			$this->getHttp()->initToken($this->getOption("t", "token"));
 
-			$require = $parameter[2];
-			$version = $parameter[3] ?? null;
+			$require = $parameter[1];
+			$version = $parameter[2] ?? null;
 			$this->getLogger()->info('looking plugins...');
 			$plugins = $this->requirePlugin($require, $version);
 			$descriptions = $this->LookingPlugins($plugins);
@@ -106,7 +106,7 @@ class cli{
 			}
 			$this->requirelibraries($descriptions);
 			if($this->changeedLibraries){
-				file_put_contents($cache, json_encode($this->libraries, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
+				file_put_contents($cache, json_encode($this->libraries, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
 			}
 			$this->makePhars($descriptions);
 			$this->getLogger()->info('packaging plugin');
@@ -327,22 +327,10 @@ class cli{
 				$version = $array["version"] ?? "*";
 				$branch = $array["branch"] ?? ":default";
 
-				if(is_int($libraryName)){
-					$libraryName = explode("\\", $library)[1];
-				}
+				$libraryName = explode("/", strtr($library, ["\\" => "/"]))[1];
 
 				$description->addLibraryEnty(new LibraryEntry($libraryName, $library, $version, $branch));
 			}
-		}
-	}
-
-	/**
-	 * @param DescriptionBase[] $descriptions
-	 * @param string $dir
-	 */
-	public function unzipping(string $descriptions, string $dir) : void{
-		foreach(new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator("phar://".__DIR__."/MultiWorld-26b23030957967722e95.zip/MultiWorld-26b23030957967722e959dd0fc1b883ed63b0b99/")) as $path => $file){
-			var_dump(substr(file_get_contents($path), 1000, 500));
 		}
 	}
 
@@ -387,6 +375,9 @@ class cli{
 		return $descriptions;
 	}
 
+	/**
+	 * @throws JsonException
+	 */
 	public function getApiDescription(string $require, string $version) : ?ApiDescription{
 		$result = $this->http->search($require);
 		$this->http->writeCache();
@@ -481,7 +472,6 @@ class cli{
 			$branches = array_flip(array_column($branches, "name"));
 
 			if($branch_version === ""){
-				$this->getLogger()->info("selected branch: ".$branch_version);
 				$this->getLogger()->info("looking ".$owner."/".$repositoryName);
 				$this->getLogger()->info("getting branch information...");
 				$result = $this->getHttp()->get("/repos/".$repo);
@@ -503,10 +493,10 @@ class cli{
 							$branch_version = $result["default_branch"];
 						}
 					}while(false);
-					$this->getLogger()->info("selected branch: ".$branch_version);
 				}else{
 					$branch_version = $result["default_branch"];
 				}
+				$this->getLogger()->info("selected branch: ".$branch_version);
 			}
 
 			/**
@@ -516,16 +506,25 @@ class cli{
 				if($class::CheckFormat($repo, $branch_version)){
 					$description = $class::init($repo, $branch_version);
 					$plugins["require"][$description->getGithubRepoName()] = $description->getVersion();
+					$this->saveManifest($plugins);
 					return $plugins;
 				}
 			}
 		}elseif(preg_match('/^[a-zA-Z0-9]*$/', $plugin)){
 			$plugins["require"][$plugin] = "*";
+			$this->saveManifest($plugins);
 			return $plugins;
 		}
 		$this->getLogger()->info("updated plugins.json");
 		//return $plugins;
 		throw new LogicException("requirePlugin: \"".$plugin."\" is an unknown format.");
+	}
+
+	/**
+	 * @param array<string, string> $plugins
+	 */
+	public function saveManifest(array $plugins) : void{
+		file_put_contents($this->dir.DIRECTORY_SEPARATOR."plugins.json", json_encode($plugins, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
 	}
 
 	public function readManifest() : array{
@@ -597,13 +596,13 @@ class cli{
 	 * @param list<string> $long_options
 	 * @param list<string> $argv
 	 * @param list<string>|null $parameter
-	 * @param bool $ignoreScriptOption
+	 * @param list<string> $after
 	 * @param bool $notallowUnknownOptions
 	 * @param list<string>|null $unknownOptions
 	 * @return array<string, string>
 	 * @see getopt() native getopt function.
 	 */
-	public static function getopt(string $short_options, array $long_options = [], array $argv = [], ?array &$parameter = null, bool $ignoreScriptOption = true, bool $notallowUnknownOptions = false, array &$unknownOptions = null) : array{
+	public static function getopt(string $short_options, array $long_options = [], array $argv = [], ?array &$parameter = null, array $after = [], bool $notallowUnknownOptions = false, array &$unknownOptions = null) : array{
 		$unknownOptions = [];
 		$result = [];
 		for($i = 1, $iMax = count($argv) - 1; $i <= $iMax; $i++){
@@ -613,16 +612,15 @@ class cli{
 				$next_value = $argv[$i + 1];
 			}
 
-			if($ignoreScriptOption === true){
-				if(str_starts_with($value, "-")){
-					unset($argv[$i]);
-					continue;
-				}
-				$ignoreScriptOption = false;
-			}
+//			if($ignoreScriptOption === true){
+//				if(str_starts_with($value, "-")){
+//					unset($argv[$i]);
+//					continue;
+//				}
+//				$ignoreScriptOption = false;
+//			}
 
-			/*
-			 if($after !== null){
+			if($after !== null){
 				foreach($after as $item){
 					if($item === $value){
 						$after = null;
@@ -632,12 +630,13 @@ class cli{
 				unset($argv[$i]);
 				continue;
 			}
-			 */
+
 			if(str_starts_with($value, "--")){
 				$found = false;
 				$target = substr($value, 2);
 				foreach($long_options as $long_option){
-					if(str_starts_with($long_option, $target)){
+					//var_dump([$target, $long_option], str_starts_with($target, $long_option));
+					if(str_starts_with($target, strstr($long_option, ":", true) ?: $long_option)){
 						$found = true;
 						$operator = substr(strstr($long_option, ":"), 0, 2);
 						if($operator === "::"){
@@ -665,9 +664,9 @@ class cli{
 				//unknown Options
 				if(!$found){
 					if($next_value === null){
-						$unknownOptions[$target][] = false;
+						$unknownOptions["--".$target][] = false;
 					}else{
-						$unknownOptions[$target][] = $next_value;
+						$unknownOptions["--".$target][] = $next_value;
 					}
 				}
 				continue;
@@ -712,9 +711,9 @@ class cli{
 						continue;
 					}
 					if($next_value === null){
-						$unknownOptions[$value[1]][] = false;
+						$unknownOptions["-".$value[1]][] = false;
 					}else{
-						$unknownOptions[$value[1]][] = $next_value;
+						$unknownOptions["-".$value[1]][] = $next_value;
 					}
 				}
 				continue;
@@ -735,11 +734,6 @@ class cli{
 
 		if($notallowUnknownOptions === true&&count($unknownOptions) !== 0){
 			foreach($unknownOptions as $name => $item){
-				if(strlen($name) === 1){
-					$name = "-".$name;
-				}else{
-					$name = "-".$name;
-				}
 				throw new CatchableException("final: The \"".$name."\" option does not exist.");
 			}
 		}
