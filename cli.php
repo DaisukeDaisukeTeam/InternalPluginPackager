@@ -4,6 +4,7 @@ use cli\description\ApiDescription;
 use cli\description\BranchDescription;
 use cli\description\DescriptionBase;
 use cli\description\ShaDescription;
+use cli\exception\CatchableException;
 use cli\http;
 use cli\LibraryEntry;
 use cli\SimpleLogger;
@@ -61,7 +62,7 @@ class cli{
 			$this->echoVersion();
 			return;
 		}
-		$this->option = self::getopt("nt:o:", ["no-dialog", "token:", "output:"], $argv, $parameter, ["install", "require", "version"]);
+		$this->option = self::getopt("nt:o:", ["no-dialog", "token:", "output:"], $argv, $parameter, false, true, $unknownOptions);//["install", "require", "version"]
 		if(count($parameter) === 0){
 			$this->getLogger()->info("usage: cli.php install|require|version");
 			return;
@@ -596,16 +597,32 @@ class cli{
 	 * @param list<string> $long_options
 	 * @param list<string> $argv
 	 * @param list<string>|null $parameter
-	 * @param list<string>|null $after
+	 * @param bool $ignoreScriptOption
+	 * @param bool $notallowUnknownOptions
+	 * @param list<string>|null $unknownOptions
 	 * @return array<string, string>
 	 * @see getopt() native getopt function.
 	 */
-	public static function getopt(string $short_options, array $long_options = [], array $argv = [], ?array &$parameter = null, ?array $after = null) : array{
+	public static function getopt(string $short_options, array $long_options = [], array $argv = [], ?array &$parameter = null, bool $ignoreScriptOption = true, bool $notallowUnknownOptions = false, array &$unknownOptions = null) : array{
+		$unknownOptions = [];
 		$result = [];
 		for($i = 1, $iMax = count($argv) - 1; $i <= $iMax; $i++){
 			$next_value = null;
 			$value = $argv[$i];
-			if($after !== null){
+			if(isset($argv[$i + 1])&&!str_starts_with($argv[$i + 1], "-")){
+				$next_value = $argv[$i + 1];
+			}
+
+			if($ignoreScriptOption === true){
+				if(str_starts_with($value, "-")){
+					unset($argv[$i]);
+					continue;
+				}
+				$ignoreScriptOption = false;
+			}
+
+			/*
+			 if($after !== null){
 				foreach($after as $item){
 					if($item === $value){
 						$after = null;
@@ -615,88 +632,130 @@ class cli{
 				unset($argv[$i]);
 				continue;
 			}
-			if(isset($argv[$i + 1])&&!str_starts_with($argv[$i + 1], "-")){
-				$next_value = $argv[$i + 1];
-			}
-
+			 */
 			if(str_starts_with($value, "--")){
+				$found = false;
 				$target = substr($value, 2);
-				if(isset($result[$target])){
-					continue;
-				}
 				foreach($long_options as $long_option){
 					if(str_starts_with($long_option, $target)){
+						$found = true;
 						$operator = substr(strstr($long_option, ":"), 0, 2);
 						if($operator === "::"){
 							if($next_value === null){
-								$result[$target] = false;
+								$result[$target][] = false;
 								unset($argv[$i]);
 								continue;
 							}
-							$result[$target] = $next_value;
+							$result[$target][] = $next_value;
 							unset($argv[$i], $argv[$i + 1]);
 							++$i;
 						}elseif($operator !== ""&&$operator[0] === ":"){
 							if($next_value === null){
 								continue;
 							}
-							$result[$target] = $next_value;
+							$result[$target][] = $next_value;
 							unset($argv[$i], $argv[$i + 1]);
 							++$i;
 						}else{
-							$result[$target] = false;
+							$result[$target][] = false;
 							unset($argv[$i]);
 						}
+					}
+				}
+				//unknown Options
+				if(!$found){
+					if($next_value === null){
+						$unknownOptions[$target][] = false;
+					}else{
+						$unknownOptions[$target][] = $next_value;
 					}
 				}
 				continue;
 			}
 
 			if(str_starts_with($value, "-")){
-				if(isset($result[$value[1]])){
-					continue;
-				}
 				if(($str = strstr($short_options, $value[1])) !== false){
 					if(substr($str, 1, 2) === "::"){
 						if(strlen($value) >= 3){
-							$result[$value[1]] = substr($value, 2);
+							$result[$value[1]][] = substr($value, 2);
 							unset($argv[$i]);
 							continue;
 						}
 						if($next_value !== null){
-							$result[$value[1]] = $next_value;
+							$result[$value[1]][] = $next_value;
 							unset($argv[$i], $argv[$i + 1]);
 							++$i;
 						}else{
-							$result[$value[1]] = false;
+							$result[$value[1]][] = false;
 							unset($argv[$i]);
 						}
 					}elseif(isset($str[1])&&$str[1] === ":"){
 						if(strlen($value) >= 3){
-							$result[$value[1]] = substr($value, 2);
+							$result[$value[1]][] = substr($value, 2);
 							unset($argv[$i]);
 							continue;
 						}
 						if($next_value === null){
 							continue;
 						}
-						$result[$value[1]] = $next_value;
+						$result[$value[1]][] = $next_value;
 						unset($argv[$i], $argv[$i + 1]);
 						++$i;
 					}else{
-						$result[$value[1]] = false;
+						$result[$value[1]][] = false;
 						unset($argv[$i]);
 					}
+				}else{
+					//unknown Options
+					if(strlen($value) >= 3){
+						$unknownOptions[$value[1]][] = substr($value, 2);
+						continue;
+					}
+					if($next_value === null){
+						$unknownOptions[$value[1]][] = false;
+					}else{
+						$unknownOptions[$value[1]][] = $next_value;
+					}
 				}
+				continue;
+			}
+		}
+		foreach($unknownOptions as $key => $item){
+			if(count($item) === 1){
+				$unknownOptions[$key] = $item[0];
+			}
+		}
+		foreach($result as $key => $item){
+			if(count($item) === 1){
+				$result[$key] = $item[0];
 			}
 		}
 		unset($argv[0]);
 		$parameter = array_values($argv);
+
+		if($notallowUnknownOptions === true&&count($unknownOptions) !== 0){
+			foreach($unknownOptions as $name => $item){
+				if(strlen($name) === 1){
+					$name = "-".$name;
+				}else{
+					$name = "-".$name;
+				}
+				throw new CatchableException("final: The \"".$name."\" option does not exist.");
+			}
+		}
+
 		return $result;
 	}
 }
 
+//var_dump($opt = getopt("v::", ["version::"]));
+////
 //var_dump($argv);
-//var_dump(cli::getopt("ot:a:v::n", ["no-dialog", "token:", "output:"], $argv, $option, ["install", "require"]));
-//var_dump($option);
-(new cli())->main($argv);
+//var_dump(cli::getopt("ot:a:v::n", ["no-dialog", "token:", "output:"], $argv, $option,false, $unknownOptions));
+//var_dump([$unknownOptions,$option]);
+try{
+	(new cli())->main($argv);
+}catch(CatchableException $exception){
+	echo "[".get_class($exception)."]".PHP_EOL;
+	echo $exception->getMessage().PHP_EOL;
+}

@@ -10,7 +10,10 @@ class SimpleLogger{
 	public function requestInput(string $message) : string{
 		echo $message;
 		return trim((string) fgets(STDIN));
+	}
 
+	public function warning(string $message) : void{
+		echo $message.PHP_EOL;
 	}
 
 	public function error(string $message) : void{
