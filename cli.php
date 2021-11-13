@@ -139,7 +139,7 @@ class cli{
 		$phar->setStub('<?php echo "build by custom builder v1.0";__HALT_COMPILER();');
 		//$phar->compressFiles(Phar::GZ);
 		$phar->stopBuffering();
-
+		unset($phar);
 	}
 
 	/**
@@ -155,12 +155,12 @@ class cli{
 		$this->getLogger()->info("making ".$description->getName().".phar");
 
 		$file_phar = $this->getCacheDir()."phar".DIRECTORY_SEPARATOR.$description->getName().".phar";
-		$this->mkdir(dirname($file_phar));
 		$description->setPharPath("phar://".$file_phar);
-		if(file_exists($file_phar)){
-			//echo "Phar file already exists, overwriting...";
-			//echo PHP_EOL;
-			Phar::unlinkArchive($file_phar);
+		$file_phar_tmp = $this->getCacheDir()."phar".DIRECTORY_SEPARATOR."tmp.phar";
+		$this->mkdir(dirname($file_phar_tmp));
+
+		if(file_exists($file_phar_tmp)){
+			Phar::unlinkArchive($file_phar_tmp);
 		}
 
 		$files = [];
@@ -173,13 +173,14 @@ class cli{
 			if($file->isFile() === false) continue;
 			$files[str_replace($dir, "", $path)] = $path;
 		}
-		$phar = new Phar($file_phar, 0);
+		$phar = new Phar($file_phar_tmp, 0);
 		$phar->startBuffering();
 		$phar->setSignatureAlgorithm(\Phar::SHA1);
 		$phar->buildFromIterator(new \ArrayIterator($files));
 		$phar->setStub('<?php echo "build by custom builder v1.0";__HALT_COMPILER();');
 		//$phar->compressFiles(Phar::GZ);
 		$phar->stopBuffering();
+		unset($phar);
 
 		$main = $description->getMain();
 		$array = explode("\\", $main);
@@ -191,10 +192,12 @@ class cli{
 			case DescriptionBase::TYPE_LIBRARY:
 				foreach($description->getLibraryEntries() as $libraryEntry){
 					$this->getLogger()->info("> install library ".$libraryEntry->getName());
-					shell_exec(PHP_BINARY." ".escapeshellarg($libraryEntry->getPharPath())." ".escapeshellarg($file_phar)." ".escapeshellarg($namespace."\\"));
+					shell_exec(PHP_BINARY." ".escapeshellarg($libraryEntry->getPharPath())." ".escapeshellarg($file_phar_tmp)." ".escapeshellarg($namespace."\\"));
 				}
 				break;
 		}
+		//hack: Destroy the memory cache of the phar.
+		rename($file_phar_tmp, $file_phar);
 	}
 
 	/**
@@ -306,6 +309,11 @@ class cli{
 				$library = $array["src"];
 				$version = $array["version"] ?? "*";
 				$branch = $array["branch"] ?? ":default";
+
+				if(is_int($libraryName)){
+					$libraryName = explode("\\", $library)[1];
+				}
+
 				$description->addLibraryEnty(new LibraryEntry($libraryName, $library, $version, $branch));
 			}
 		}
