@@ -524,10 +524,16 @@ class cli{
 	 * @param array<string, string> $plugins
 	 */
 	public function saveManifest(array $plugins) : void{
+		if($this->hasOption("no-manifest")){
+			return;
+		}
 		file_put_contents($this->dir.DIRECTORY_SEPARATOR."plugins.json", json_encode($plugins, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
 	}
 
 	public function readManifest() : array{
+		if($this->hasOption("no-manifest")){
+			return ["require" => []];
+		}
 		$plugins = [];
 		if(file_exists($this->dir."plugins.json")){
 			$plugins = json_decode(file_get_contents($this->dir."plugins.json"), true, 512, JSON_THROW_ON_ERROR);
