@@ -23,6 +23,8 @@ spl_autoload_register(function($class) use ($dir){
 });
 
 class cli{
+	public const VERSION = "0.0.1";
+
 	public SimpleLogger $logger;
 	public http $http;
 	public string $dir;
@@ -49,19 +51,33 @@ class cli{
 		$this->http = new http($this->dir);
 	}
 
+	public function echoVersion() : void{
+		$this->getLogger()->info("version v".self::VERSION);
+	}
+
 	public function main(array $argv) : void{
-		if(count($argv) === 1){
-			$this->getLogger()->info("usage: cli.php install|require");
+		$opt = getopt("v", ["version"]);
+		if(isset($opt["version"])||isset($opt["v"])){
+			$this->echoVersion();
+			return;
+		}
+		$this->option = self::getopt("nt:o:", ["no-dialog", "token:", "output:"], $argv, $parameter, ["install", "require", "version"]);
+		if(count($parameter) === 0){
+			$this->getLogger()->info("usage: cli.php install|require|version");
 			return;
 		}
 
-		if($argv[1] === "install"){
+		if($parameter[0] === "version"){
+			$this->echoVersion();
+			return;
+		}
+
+		if($parameter[0] === "install"){
 
 		}
 
-		if($argv[1] === "require"){
-			$this->option = self::getopt("nt:o:", ["no-dialog", "token:", "output:"], $argv);
-			if(count($argv) < 3){
+		if($parameter[0] === "require"){
+			if(count($parameter) < 3){
 				$this->getLogger()->info('usage: cli.php require multiworld');
 				$this->getLogger()->info('usage: cli.php require https://github.com/DaisukeDaisukeTeam/BuyLand');
 				$this->getLogger()->info('usage: cli.php require https://github.com/DaisukeDaisukeTeam/BuyLand/tree/test');
@@ -72,8 +88,8 @@ class cli{
 
 			$this->getHttp()->initToken($this->getOption("t", "token"));
 
-			$require = $argv[2];
-			$version = $argv[3] ?? null;
+			$require = $parameter[2];
+			$version = $parameter[3] ?? null;
 			$this->getLogger()->info('looking plugins...');
 			$plugins = $this->requirePlugin($require, $version);
 			$descriptions = $this->LookingPlugins($plugins);
@@ -136,7 +152,7 @@ class cli{
 		$phar->startBuffering();
 		$phar->setSignatureAlgorithm(\Phar::SHA1);
 		$phar->buildFromIterator(new \ArrayIterator($files));
-		$phar->setStub('<?php echo "build by custom builder v1.0";__HALT_COMPILER();');
+		$phar->setStub('<?php echo "build by custom builder v'.self::VERSION.'";__HALT_COMPILER();');
 		//$phar->compressFiles(Phar::GZ);
 		$phar->stopBuffering();
 		unset($phar);
@@ -177,7 +193,7 @@ class cli{
 		$phar->startBuffering();
 		$phar->setSignatureAlgorithm(\Phar::SHA1);
 		$phar->buildFromIterator(new \ArrayIterator($files));
-		$phar->setStub('<?php echo "build by custom builder v1.0";__HALT_COMPILER();');
+		$phar->setStub('<?php echo "build by custom builder v'.self::VERSION.'";__HALT_COMPILER();');
 		//$phar->compressFiles(Phar::GZ);
 		$phar->stopBuffering();
 		unset($phar);
@@ -476,9 +492,8 @@ class cli{
 					foreach($branches as $name => $index){
 						$this->getLogger()->info("[".$name."]: ".$index);
 					}
-					$input = "";
 					do{
-						$input = 2;//$this->getLogger()->requestInput("branch [".$result["default_branch"]."/".$branches[$result["default_branch"]]."]: ");
+						$input = $this->getLogger()->requestInput("branch [".$result["default_branch"]."/".$branches[$result["default_branch"]]."]: ");
 						if(isset($branches[$input])){
 							$branch_version = $input;
 						}elseif(($search = array_search($input, $branches, true)) !== false){
@@ -505,10 +520,11 @@ class cli{
 			}
 		}elseif(preg_match('/^[a-zA-Z0-9]*$/', $plugin)){
 			$plugins["require"][$plugin] = "*";
+			return $plugins;
 		}
 		$this->getLogger()->info("updated plugins.json");
 		//return $plugins;
-		throw new LogicException("requirePlugin: unknown format.");
+		throw new LogicException("requirePlugin: \"".$plugin."\" is an unknown format.");
 	}
 
 	public function readManifest() : array{
@@ -579,13 +595,26 @@ class cli{
 	 * @param string $short_options
 	 * @param list<string> $long_options
 	 * @param list<string> $argv
+	 * @param list<string>|null $parameter
+	 * @param list<string>|null $after
 	 * @return array<string, string>
+	 * @see getopt() native getopt function.
 	 */
-	public static function getopt(string $short_options, array $long_options = [], array $argv = []) : array{
+	public static function getopt(string $short_options, array $long_options = [], array $argv = [], ?array &$parameter = null, ?array $after = null) : array{
 		$result = [];
 		for($i = 1, $iMax = count($argv) - 1; $i <= $iMax; $i++){
 			$next_value = null;
 			$value = $argv[$i];
+			if($after !== null){
+				foreach($after as $item){
+					if($item === $value){
+						$after = null;
+						continue 2;
+					}
+				}
+				unset($argv[$i]);
+				continue;
+			}
 			if(isset($argv[$i + 1])&&!str_starts_with($argv[$i + 1], "-")){
 				$next_value = $argv[$i + 1];
 			}
@@ -601,18 +630,22 @@ class cli{
 						if($operator === "::"){
 							if($next_value === null){
 								$result[$target] = false;
+								unset($argv[$i]);
 								continue;
 							}
 							$result[$target] = $next_value;
+							unset($argv[$i], $argv[$i + 1]);
 							++$i;
 						}elseif($operator !== ""&&$operator[0] === ":"){
 							if($next_value === null){
 								continue;
 							}
 							$result[$target] = $next_value;
+							unset($argv[$i], $argv[$i + 1]);
 							++$i;
 						}else{
 							$result[$target] = false;
+							unset($argv[$i]);
 						}
 					}
 				}
@@ -625,25 +658,45 @@ class cli{
 				}
 				if(($str = strstr($short_options, $value[1])) !== false){
 					if(substr($str, 1, 2) === "::"){
+						if(strlen($value) >= 3){
+							$result[$value[1]] = substr($value, 2);
+							unset($argv[$i]);
+							continue;
+						}
 						if($next_value !== null){
 							$result[$value[1]] = $next_value;
+							unset($argv[$i], $argv[$i + 1]);
 							++$i;
 						}else{
 							$result[$value[1]] = false;
+							unset($argv[$i]);
 						}
 					}elseif(isset($str[1])&&$str[1] === ":"){
+						if(strlen($value) >= 3){
+							$result[$value[1]] = substr($value, 2);
+							unset($argv[$i]);
+							continue;
+						}
 						if($next_value === null){
 							continue;
 						}
 						$result[$value[1]] = $next_value;
+						unset($argv[$i], $argv[$i + 1]);
+						++$i;
 					}else{
 						$result[$value[1]] = false;
+						unset($argv[$i]);
 					}
 				}
 			}
 		}
+		unset($argv[0]);
+		$parameter = array_values($argv);
 		return $result;
 	}
 }
 
+//var_dump($argv);
+//var_dump(cli::getopt("ot:a:v::n", ["no-dialog", "token:", "output:"], $argv, $option, ["install", "require"]));
+//var_dump($option);
 (new cli())->main($argv);

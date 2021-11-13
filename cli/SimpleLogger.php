@@ -9,7 +9,7 @@ class SimpleLogger{
 
 	public function requestInput(string $message) : string{
 		echo $message;
-		return trim(fgets(STDIN));
+		return trim((string) fgets(STDIN));
 
 	}
 
