@@ -1,8 +1,9 @@
 <?php
 
 use cli\description\ApiDescription;
-use cli\description\BranchDescription;
 use cli\description\DescriptionBase;
+use cli\description\DescriptionType;
+use cli\description\PharDescription;
 use cli\description\ShaDescription;
 use cli\exception\CatchableException;
 use cli\http;
@@ -65,6 +66,7 @@ class cli{
 		$this->option = self::getopt("nt:o:", ["no-manifest", "no-dialog", "token:", "output:"], $argv, $parameter, ["version", "install", "require"], true, $unknownOptions);//["install", "require", "version"]
 		if(count($parameter) === 0){
 			$this->getLogger()->info("usage: cli.php install|require|version");
+			$this->getLogger()->info("[-v|--version]");
 			return;
 		}
 
@@ -74,6 +76,33 @@ class cli{
 		}
 
 		if($parameter[0] === "install"){
+			$this->output = $this->getOption("o", "output") ?? $this->dir."output.phar";
+
+			$this->getHttp()->initToken($this->getOption("t", "token"));
+
+			$plugins = $this->readManifest();
+			if(count($plugins["require"] ?? []) === 0){
+				$this->getLogger()->info("nothing to install.");
+				return;
+			}
+			$descriptions = $this->LookingPlugins($plugins);
+			$this->getLogger()->info('downloading plugins...');
+			$descriptions = $this->downloadZipball($descriptions);
+			$this->getLogger()->info('scan libraries...');
+			$descriptions = $this->analyzeManifests($descriptions);
+			//$this->getLogger()->info('download libraries...');
+
+			$cache = $this->getCacheDir()."libraries".DIRECTORY_SEPARATOR."index.json";
+			if(file_exists($cache)){
+				$this->libraries = json_decode(file_get_contents($cache), true, 512, JSON_THROW_ON_ERROR);
+			}
+			$this->requirelibraries($descriptions);
+			if($this->changeedLibraries){
+				file_put_contents($cache, json_encode($this->libraries, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+			}
+			$this->makePhars($descriptions);
+			$this->getLogger()->info('packaging plugins');
+			$this->packagingPhars($descriptions);
 
 		}
 
@@ -82,6 +111,7 @@ class cli{
 				$this->getLogger()->info('usage: cli.php require multiworld');
 				$this->getLogger()->info('usage: cli.php require https://github.com/DaisukeDaisukeTeam/BuyLand');
 				$this->getLogger()->info('usage: cli.php require https://github.com/DaisukeDaisukeTeam/BuyLand/tree/test');
+				$this->getLogger()->info("[-n|--no-dialog] [-t|token] [-o|output] [--no-manifest]");
 				return;
 			}
 
@@ -124,8 +154,6 @@ class cli{
 	 */
 	protected function packagingPhars(array $descriptions) : void{
 		if(file_exists($this->output)){
-			//echo "Phar file already exists, overwriting...";
-			//echo PHP_EOL;
 			Phar::unlinkArchive($this->output);
 		}
 		$files = [];
@@ -134,17 +162,12 @@ class cli{
 			$files[str_replace(__DIR__, "", $path)] = $path;
 		}
 
-		$cachedir = $this->getCacheDir();
-
 		$files["plugin.yml"] = $this->sourcedir."resources/plugin.yml";
 		foreach($descriptions as $description){
 			$name = $description->getName();
 			$basePath = $description->getPharPath();
 			$resourceDir = "resources/plugins/".strtolower($description->getName());
 			foreach(new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($basePath)) as $path => $file){
-//				$tmp = $cachedir."tmp".DIRECTORY_SEPARATOR.$name.str_replace($basePath, "", $path);
-//				$this->mkdir(dirname($tmp));
-//				copy($path, $tmp);
 				$files[$resourceDir.str_replace($basePath, "", $path)] = $path;
 			}
 		}
@@ -173,7 +196,9 @@ class cli{
 
 		$file_phar = $this->getCacheDir()."phar".DIRECTORY_SEPARATOR.$description->getName().".phar";
 		$description->setPharPath("phar://".$file_phar);
-		$file_phar_tmp = $this->getCacheDir()."phar".DIRECTORY_SEPARATOR."tmp.phar";
+
+		$file_phar_tmp = $this->getCacheDir()."phar".DIRECTORY_SEPARATOR."tmp_".$description->getName().".phar";
+
 		$this->mkdir(dirname($file_phar_tmp));
 
 		if(file_exists($file_phar_tmp)){
@@ -204,9 +229,9 @@ class cli{
 		unset($array[array_key_last($array)]);
 		$namespace = implode("\\", $array);
 		switch($description->getType()){
-//			case DescriptionBase::TYPE_NORMAL:
+//			case DescriptionType::TYPE_NORMAL:
 //				break;
-			case DescriptionBase::TYPE_LIBRARY:
+			case DescriptionType::TYPE_LIBRARY:
 				foreach($description->getLibraryEntries() as $libraryEntry){
 					$this->getLogger()->info("> install library ".$libraryEntry->getName());
 					shell_exec(PHP_BINARY." ".escapeshellarg($libraryEntry->getPharPath())." ".escapeshellarg($file_phar_tmp)." ".escapeshellarg($namespace."\\"));
@@ -223,7 +248,7 @@ class cli{
 	 */
 	public function requirelibraries(array $descriptions) : array{
 		foreach($descriptions as $description){
-			if($description->getType() === DescriptionBase::TYPE_NORMAL){
+			if($description->getType() === DescriptionType::TYPE_NORMAL){
 				continue;
 			}
 			$this->requireLibrary($description);
@@ -248,7 +273,7 @@ class cli{
 			if(isset($this->libraries[$libraryEntry->getCacheName()])){
 				$phardir = $cachedir.$this->libraries[$libraryEntry->getCacheName()];
 				if(file_exists($phardir)){
-					$this->getLogger()->info("found ".$description->getName()." library cache.");
+					$this->getLogger()->info("found ".$libraryEntry->getName()." library cache.");
 					$libraryEntry->setPharPath($phardir);
 					continue;
 				}
@@ -259,7 +284,7 @@ class cli{
 				unlink($tmpphar);
 			}
 
-			$tmpphar = $cachedir."test.phar";
+			$tmpphar = $cachedir."tmp.phar";
 
 			$array = explode("/", trim($libraryEntry->getLibrary()));
 			$this->getHttp()->downloadLibrary($tmpphar, $array[0], $array[1], $array[2], $libraryEntry->getVersion(), $libraryEntry->getBranch());
@@ -277,7 +302,8 @@ class cli{
 
 			$manifest = yaml_parse(file_get_contents("phar://".$tmpphar.DIRECTORY_SEPARATOR."virion.yml"));
 			$actualVersion = $manifest["version"];
-			$target = $libraryEntry->getName()."_v".strstr($actualVersion, ".", true).".phar";
+			$escape_version = preg_replace("/[^a-zA-Z0-9]/", "_", $actualVersion);
+			$target = $libraryEntry->getName()."_v".$escape_version.".phar";
 			rename($tmpphar, $cachedir.$target);
 			$libraryEntry->setPharPath($cachedir.$target);
 			$this->libraries[$libraryEntry->getCacheName()] = $target;
@@ -309,7 +335,7 @@ class cli{
 		$description->setMain($pluginManifest["main"]);
 
 		if(!file_exists($path)){
-			$description->setType(DescriptionBase::TYPE_NORMAL);//github
+			$description->setType(DescriptionType::TYPE_NORMAL);//github
 			return;
 			//throw new \RuntimeException("manifest file ".$path." not found.");
 		}
@@ -340,6 +366,15 @@ class cli{
 	 * @return DescriptionBase[]
 	 */
 	public function LookingPlugins(array $plugins) : array{
+		$repository = [];
+		foreach(($plugins["repository"] ?? []) as $key => $array){
+			$index = $array["src"] ?? $array["name"] ?? null;
+			if($index === null){
+				throw new CatchableException("repository \"".$key."\" must Define src or name value.");
+			}
+			$repository[$index] = $array;
+		}
+
 		$descriptions = [];
 		foreach(($plugins["require"] ?? []) as $require => $version){
 			/*
@@ -352,71 +387,44 @@ class cli{
 			multiworld
 			*/
 
-			if(preg_match('/^[a-zA-Z0-9]*$/', $require)){
-				$this->getLogger()->info("looking ".$require);
-				$descriptions[] = $this->getApiDescription($require, $version);
-			}else{
-				switch(true){
-					case ShaDescription::CheckFormat($require, $version):
-						$descriptions[] = ShaDescription::init($require, $version);
-						break;
-					default://branch
-						$branches = $this->getHttp()->get("https://api.github.com/repos/".$require."/branches");
-						foreach($branches as $index => $array){
-							if($array["name"] === $version){
-								$version = $array["commit"]["sha"];//commit sha
-							}
-						}
-						$descriptions[] = ShaDescription::init($require, $version);
-						break;
+			$this->getLogger()->info("looking ".$require);
+			$type = null;
+			$zippath = "";
+			$urlpath = "";
+			if(isset($repository[$require])){
+				$require = $repository[$require]["src"];
+				$zippath = $repository[$require]["path"] ?? "";
+				$urlpath = $repository[$require]["url_path"] ?? "";
+				$type = $repository[$require]["type"] ?? null;
+			}
+
+			if($type === null){
+				if(preg_match('/^[a-zA-Z0-9]*$/', $require)){
+					$type = DescriptionType::TYPE_LIBRARY;
+				}else{
+					$type = DescriptionType::TYPE_NORMAL;
 				}
 			}
+			/**
+			 * @var class-string<DescriptionBase>[] $types
+			 */
+			$types = [
+				DescriptionType::TYPE_LIBRARY => ApiDescription::class,
+				DescriptionType::TYPE_NORMAL => ShaDescription::class,
+				DescriptionType::TYPE_PHAR => PharDescription::class,
+			];
+
+			if(!isset($types[$type])){
+				throw new CatchableException($require." is invalid format.");
+			}
+
+			/** @var DescriptionBase $description */
+			$description = $types[$type]::init($this->getHttp(), $require, $version);
+			$description->setZipPath($zippath);
+			$description->setUrlPath($urlpath);
+			$descriptions[] = $description;
 		}
 		return $descriptions;
-	}
-
-	/**
-	 * @throws JsonException
-	 */
-	public function getApiDescription(string $require, string $version) : ?ApiDescription{
-		$result = $this->http->search($require);
-		$this->http->writeCache();
-		if(count($result) === 0){
-			$this->getLogger()->error("plugin 「".$require."」not found.");
-			return null;
-		}
-		$data = null;
-		$similars = [];
-		if($version === "*"||$version === "latest"){
-			/*$id = -1;
-			while(isset($result[++$id]["state_name"])&&$result[$id]["state_name"] !== "Approved");
-			if(isset($result[$id])){
-				$data = $result[$id];
-			}*/
-			$data = $result[0] ?? null;
-		}else{
-			foreach($result as $array){
-				if(strtolower($array["version"]) === strtolower($version)){
-					$data = $array;
-					break;
-				}
-
-				if(str_starts_with(strtolower($array["version"]), strtolower($version))){
-					$similars[] = $array["version"];
-				}
-			}
-		}
-
-		if($data === null){
-			$this->logger->error("「".$require."」version 「".$version."」not found.");
-			if(count($similars) !== 0){
-				$this->logger->error("suggested version: ".implode(" ", $similars));
-			}
-			return null;
-		}
-
-
-		return new ApiDescription($data);
 	}
 
 	/**
@@ -427,7 +435,7 @@ class cli{
 		$concurrentDirectory = $this->getCacheDir();
 		$this->mkdir($concurrentDirectory);
 		foreach($descriptions as $description){
-			$cachefile = $description->getName()."-".$description->getCacheName().".zip";
+			$cachefile = $description->getCacheFile();
 			$cachefile = preg_replace("/[^a-zA-Z0-9.]/", "-", $cachefile);
 			if(!is_string($cachefile)){
 				var_dump($cachefile);
@@ -502,9 +510,9 @@ class cli{
 			/**
 			 * @var DescriptionBase $class
 			 */
-			foreach([ShaDescription::class, BranchDescription::class] as $class){
-				if($class::CheckFormat($repo, $branch_version)){
-					$description = $class::init($repo, $branch_version);
+			foreach([ShaDescription::class] as $class){
+				if($class::isValidFormat($repo, $branch_version)){
+					$description = $class::init($this->getHttp(), $repo, $branch_version);
 					$plugins["require"][$description->getGithubRepoName()] = $description->getVersion();
 					$this->saveManifest($plugins);
 					return $plugins;

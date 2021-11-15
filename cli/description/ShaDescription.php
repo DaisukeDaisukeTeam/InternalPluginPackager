@@ -2,6 +2,9 @@
 
 namespace cli\description;
 
+use cli\exception\CatchableException;
+use cli\http;
+
 class ShaDescription extends DescriptionBase{
 	protected string $owner;
 	protected string $repositoryName;
@@ -36,11 +39,11 @@ class ShaDescription extends DescriptionBase{
 	}
 
 	public function getPluginManifestPath() : string{
-		return $this->getRootPath()."/plugin.yml";
+		return $this->getRootPath()."plugin.yml";
 	}
 
 	public function getManifestPath() : string{
-		return $this->getRootPath()."/.poggit.yml";
+		return $this->getRootPath().".poggit.yml";
 	}
 
 	public function getRootPath() : string{
@@ -48,7 +51,7 @@ class ShaDescription extends DescriptionBase{
 		if($cachedir === null){
 			throw new \LogicException("\$this->getCacheName() === null");
 		}
-		return "phar://".$cachedir.DIRECTORY_SEPARATOR.$this->getName()."-".$this->getGithubCommitsha().DIRECTORY_SEPARATOR;
+		return "phar://".$cachedir.DIRECTORY_SEPARATOR.$this->getName()."-".$this->getGithubCommitsha().DIRECTORY_SEPARATOR.$this->getZipPath();
 	}
 
 	public function getUrlVersion() : ?string{
@@ -71,12 +74,33 @@ class ShaDescription extends DescriptionBase{
 		$this->cachePath = $cachePath;
 	}
 
-	public static function CheckFormat(string $require, string $version) : bool{
-		return preg_match("/[a-zA-Z0-9]*\/[a-zA-Z0-9]*/u", $require)&&preg_match('/^[0-9a-f]{40}$/', $version);
+	public static function isValidFormat(string $require, string $version) : bool{
+		return preg_match("/[a-zA-Z0-9]*\/[a-zA-Z0-9]*/u", $require);
 	}
 
-	public static function init(string $require, string $version) : static{
+	public static function init(http $http, string $require, string $version){
+		$version = self::convertsha($http, $require, $version);
 		$array = explode("/", $require);
-		return new self($array[0], $array[1], $version);
+		return new static($array[0], $array[1], $version);
+	}
+
+	public static function convertsha(http $http, string $require, string $version) : string{
+		if(preg_match('/^[0-9a-f]{40}$/', $version)){
+			return $version;
+		}
+		$branches = $http->get("https://api.github.com/repos/".$require."/branches");
+		$http->writeCache();
+		$found = false;
+		foreach($branches as $index => $array){
+			if($array["name"] === $version){
+				$version = $array["commit"]["sha"];//commit sha
+				$found = true;
+			}
+		}
+		if($found === false){
+			$suggestion = implode(PHP_EOL, array_column($branches, "name"));
+			throw new CatchableException("branch ".$version." not found.\nsuggestion\n".$suggestion);
+		}
+		return $version;
 	}
 }

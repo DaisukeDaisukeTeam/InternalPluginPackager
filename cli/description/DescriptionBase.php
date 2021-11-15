@@ -2,6 +2,7 @@
 
 namespace cli\description;
 
+use cli\http;
 use cli\LibraryEntry;
 
 abstract class DescriptionBase{
@@ -29,17 +30,21 @@ abstract class DescriptionBase{
 
 	abstract public function setCachePath(?string $cachePath);
 
-	abstract public static function CheckFormat(string $require, string $version) : bool;
+	abstract public static function isValidFormat(string $require, string $version) : bool;
 
-	abstract public static function init(string $require, string $version) : static;
-
-	public const TYPE_NORMAL = 0;//github
-	public const TYPE_LIBRARY = 1;
+	/**
+	 * @param string $require
+	 * @param string $version
+	 * @return DescriptionBase
+	 */
+	abstract public static function init(http $http, string $require, string $version);
 
 	/** @var LibraryEntry[] $library */
 	protected array $library = [];
 	protected string $main;
 	protected string $pharPath;
+	protected string $zipPath = "";
+	protected string $urlPath = "";
 
 	public function getMain() : string{
 		return $this->main;
@@ -50,7 +55,7 @@ abstract class DescriptionBase{
 	}
 
 	protected string $projectPath;
-	protected int $type = self::TYPE_LIBRARY;
+	protected string $type = DescriptionType::TYPE_LIBRARY;
 
 	public function addLibraryEnty(LibraryEntry $library) : void{
 		$this->library[] = $library;
@@ -71,11 +76,11 @@ abstract class DescriptionBase{
 		$this->projectPath = $projectPath;
 	}
 
-	public function getType() : int{
+	public function getType() : string{
 		return $this->type;
 	}
 
-	public function setType(int $type) : void{
+	public function setType(string $type) : void{
 		$this->type = $type;
 	}
 
@@ -85,5 +90,31 @@ abstract class DescriptionBase{
 
 	public function setPharPath(string $pharPath) : void{
 		$this->pharPath = $pharPath;
+	}
+
+	public function getZipPath() : string{
+		return $this->zipPath;
+	}
+
+	public function setZipPath(string $path) : void{
+		if(trim($path) === ""){
+			return;
+		}
+		$this->zipPath = $path;
+		if($this->zipPath[-1] !== "/"||$this->zipPath[-1] !== "\\"){
+			$this->zipPath .= DIRECTORY_SEPARATOR;
+		}
+	}
+
+	public function getCacheFile() : string{
+		return $this->getName()."-".$this->getCacheName().".zip";
+	}
+
+	public function getUrlPath() : string{
+		return $this->urlPath;
+	}
+
+	public function setUrlPath(string $urlPath) : void{
+		$this->urlPath = $urlPath;
 	}
 }

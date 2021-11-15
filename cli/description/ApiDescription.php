@@ -2,6 +2,9 @@
 
 namespace cli\description;
 
+use cli\exception\CatchableException;
+use cli\http;
+
 class ApiDescription extends DescriptionBase{
 	public array $data;
 	public ?string $cachePath;
@@ -60,12 +63,47 @@ class ApiDescription extends DescriptionBase{
 		$this->cachePath = $cachePath;
 	}
 
-	public static function CheckFormat(string $require, string $version) : bool{
+	public static function isValidFormat(string $require, string $version) : bool{
 		// TODO: Implement CheckFormat() method.
 	}
 
-	public static function init(string $require, string $version) : static{
-		// TODO: Implement init() method.
+	public static function init(http $http, string $require, string $version) : static{
+		$result = $http->search($require);
+		$http->writeCache();
+		if(count($result) === 0){
+			throw new CatchableException("plugin 「".$require."」not found.");
+		}
+		$data = null;
+		$similars = [];
+		if($version === "*"||$version === "latest"){
+			/*$id = -1;
+			while(isset($result[++$id]["state_name"])&&$result[$id]["state_name"] !== "Approved");
+			if(isset($result[$id])){
+				$data = $result[$id];
+			}*/
+			$data = $result[0] ?? null;
+		}else{
+			foreach($result as $array){
+				if(strtolower($array["version"]) === strtolower($version)){
+					$data = $array;
+					break;
+				}
+
+				if(str_starts_with(strtolower($array["version"]), strtolower($version))){
+					$similars[] = $array["version"];
+				}
+			}
+		}
+
+		if($data === null){
+			$suggestion = "";
+			if(count($similars) !== 0){
+				$suggestion = "\nsuggested version: ".implode(" ", $similars);
+			}
+			throw new CatchableException("「".$require."」version 「".$version."」not found.".$suggestion);
+		}
+
+		return new self($data);
 	}
 
 	public function getVersion() : string{
