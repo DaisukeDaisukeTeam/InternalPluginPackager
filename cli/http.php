@@ -2,12 +2,15 @@
 
 namespace cli;
 
+use cli\exception\HttpNotFoundException;
+
 class http{
 	public const TYPE_SEARCH = "plugin";
 
 	private array $cache = [];
 	private string $cachefile;
 	private string $cachefile1;
+	private string $cachefile2;
 	private bool $cachechanged = false;
 	private string|null|false $token;
 
@@ -23,6 +26,8 @@ class http{
 		if(file_exists($this->cachefile1)){
 			$this->runtimeGithubCache = json_decode(file_get_contents($this->cachefile1), true, 512, JSON_THROW_ON_ERROR);
 		}
+
+		$this->cachefile2 = $cachedir.DIRECTORY_SEPARATOR."VirionListCache.json";
 	}
 
 	public function initToken(?string $token = null) : void{
@@ -92,10 +97,10 @@ class http{
 
 		//var_dump($data);
 		//var_dump($test);
-		//sleep(1);
+		sleep(1);
 		if($statuscode >= 400){
 			var_dump("StatusCode: ".$statuscode);
-			throw new \RuntimeException("request failed: received status code \"".$statuscode."\"");
+			throw new HttpNotFoundException("request failed: received status code \"".$statuscode."\"");
 		}
 		return $return;
 	}
@@ -107,6 +112,7 @@ class http{
 		if(!isset($this->runtimeGithubCache[$url])){
 			$this->runtimeGithubCache[$url] = $this->getRawData($url, $data, $request);
 		}
+		//$this->writeCache();
 		$this->cachechanged = true;
 		return json_decode($this->runtimeGithubCache[$url], true, 512, JSON_THROW_ON_ERROR);
 	}
@@ -115,7 +121,7 @@ class http{
 		if(!$force&&isset($this->cache[self::TYPE_SEARCH][$plugin_name])){
 			return json_decode($this->cache[self::TYPE_SEARCH][$plugin_name], true, 512, JSON_THROW_ON_ERROR);
 		}
-		exit();
+		//exit();
 		$url = 'https://poggit.pmmp.io/releases.json?name='.$plugin_name;
 		var_dump("GET: ".$url);
 		$curl = curl_init($url);
@@ -144,7 +150,7 @@ class http{
 		sleep(1);
 		if($statuscode >= 400){
 			var_dump("StatusCode: ".$statuscode);
-			throw new \RuntimeException("request failed: received status code \"".$statuscode."\"");
+			throw new HttpNotFoundException("request failed: received status code \"".$statuscode."\"");
 		}
 		$this->cache[self::TYPE_SEARCH][$plugin_name] = $return;
 		$this->cachechanged = true;
@@ -155,6 +161,9 @@ class http{
 		$url = "https://poggit.pmmp.io/v.dl/".urlencode($owner)."/".urlencode($name)."/".urlencode($projectname)."/".urlencode(trim($version))."?branch=".urlencode(trim($branch));
 		var_dump("GET: ".$url);
 		$curl = curl_init($url);
+
+		var_dump("disabled codes");
+		exit();
 
 		curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, FALSE); // オレオレ証明書対策
 		curl_setopt($curl, CURLOPT_FOLLOWLOCATION, TRUE);// Locationヘッダを追跡
@@ -181,7 +190,48 @@ class http{
 		sleep(1);
 		if($statuscode >= 400){
 			var_dump("StatusCode: ".$statuscode);
-			throw new \RuntimeException("request failed: received status code \"".$statuscode."\"");
+			throw new HttpNotFoundException("request failed: received status code \"".$statuscode."\"");
 		}
+	}
+
+	public function getPoggitPopularVirionList() : void{
+		$url = "https://poggit.pmmp.io/v?top=10000";
+		var_dump("GET: ".$url);
+		var_dump("disabled codes");
+
+//		$curl = curl_init($url);
+//
+//		curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, FALSE); // オレオレ証明書対策
+//		curl_setopt($curl, CURLOPT_FOLLOWLOCATION, TRUE);// Locationヘッダを追跡
+//
+//		curl_setopt($curl, CURLOPT_USERAGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.71 Safari/537.36");
+//
+//		curl_setopt($curl, CURLOPT_TIMEOUT, 15);
+//		curl_setopt($curl, CURLOPT_CONNECTTIMEOUT, 15);
+//
+//		//curl_setopt($curl, CURLOPT_CAINFO, '/path/to/cacert.pem');
+//
+//		curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+//		$return = curl_exec($curl);
+//
+//		$errno = curl_errno($curl);
+//		$error = curl_error($curl);
+//		if($errno !== CURLE_OK){
+//			throw new \RuntimeException($error, $errno);
+//		}
+//
+//		$statuscode = curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
+//		//var_dump("StatusCode: ".$statuscode);
+//		curl_close($curl);
+//		sleep(1);
+//
+//		preg_match_all('/<li>\s*?<h3>\s*?.*?<a href="\/ci\/(.*?\/.*?\/.*?)">(.*?)<\/a>.*?https:\/\/github\.com\/(.*?)\'.*?<p class="remark">(.*?), Used by/usm', $return, $m);
+//		unset($m[0]);
+//		file_put_contents($this->cachefile2, json_encode(array_values($m),JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+//
+//		if($statuscode >= 400){
+//			var_dump("StatusCode: ".$statuscode);
+//			throw new HttpNotFoundException("request failed: received status code \"".$statuscode."\"");
+//		}
 	}
 }

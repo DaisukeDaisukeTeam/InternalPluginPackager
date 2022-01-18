@@ -45,6 +45,7 @@ abstract class DescriptionBase{
 	protected string $pharPath;
 	protected string $zipPath = "";
 	protected string $urlPath = "";
+	protected ?string $zipInternalPath = null;
 
 	public function getMain() : string{
 		return $this->main;
@@ -116,5 +117,16 @@ abstract class DescriptionBase{
 
 	public function setUrlPath(string $urlPath) : void{
 		$this->urlPath = $urlPath;
+	}
+
+	public function setZipInternalPath(string $zipInternalPath) : void{
+		$this->zipInternalPath = $zipInternalPath;
+	}
+
+	public function getZipInternalPath() : string{
+		if(isset($this->zipInternalPath)){
+			return $this->zipInternalPath;
+		}
+		return $this->getName()."-".$this->getGithubCommitsha();
 	}
 }

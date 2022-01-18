@@ -6,6 +6,7 @@ use cli\description\DescriptionType;
 use cli\description\PharDescription;
 use cli\description\ShaDescription;
 use cli\exception\CatchableException;
+use cli\exception\HttpNotFoundException;
 use cli\http;
 use cli\LibraryEntry;
 use cli\SimpleLogger;
@@ -50,7 +51,10 @@ class cli{
 		}
 
 		$this->logger = new SimpleLogger();
-		$this->http = new http($this->dir);
+		$this->http = new http($this->dir."cache");
+
+		$this->getHttp()->get("/rate_limit");
+		exit();
 	}
 
 	public function echoVersion() : void{
@@ -85,6 +89,7 @@ class cli{
 				$this->getLogger()->info("nothing to install.");
 				return;
 			}
+
 			$descriptions = $this->LookingPlugins($plugins);
 			$this->getLogger()->info('downloading plugins...');
 			$descriptions = $this->downloadZipball($descriptions);
@@ -229,8 +234,10 @@ class cli{
 		unset($array[array_key_last($array)]);
 		$namespace = implode("\\", $array);
 		switch($description->getType()){
-//			case DescriptionType::TYPE_NORMAL:
-//				break;
+			case DescriptionType::TYPE_NORMAL:
+			if(count($description->getLibraryEntries()) === 0){
+				break;
+			}
 			case DescriptionType::TYPE_LIBRARY:
 				foreach($description->getLibraryEntries() as $libraryEntry){
 					$this->getLogger()->info("> install library ".$libraryEntry->getName());
@@ -248,7 +255,7 @@ class cli{
 	 */
 	public function requirelibraries(array $descriptions) : array{
 		foreach($descriptions as $description){
-			if($description->getType() === DescriptionType::TYPE_NORMAL){
+			if(count($description->getLibraryEntries()) === 0){
 				continue;
 			}
 			$this->requireLibrary($description);
@@ -280,10 +287,6 @@ class cli{
 			}
 			$this->getLogger()->info("downloading ".$libraryEntry->getName()." library...");
 
-			if(file_exists($tmpphar)){
-				unlink($tmpphar);
-			}
-
 			$tmpphar = $cachedir."tmp.phar";
 
 			$array = explode("/", trim($libraryEntry->getLibrary()));
@@ -309,6 +312,11 @@ class cli{
 			$this->libraries[$libraryEntry->getCacheName()] = $target;
 			$this->changeedLibraries = true;
 			$foundCache = false;
+
+			//
+			$cache = $this->getCacheDir()."libraries".DIRECTORY_SEPARATOR."index.json";
+			file_put_contents($cache, json_encode($this->libraries, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
+			$this->changeedLibraries = false;
 		}
 	}
 
@@ -318,7 +326,13 @@ class cli{
 	 */
 	public function analyzeManifests(array $descriptions) : array{
 		foreach($descriptions as $description){
-			$this->analyzeManifest($description);
+//			$this->analyzeProgram($description);
+			if(file_exists($description->getManifestPath())){
+				$this->analyzeManifest($description);
+			}else{
+				$this->analyzeProgram($description);
+			}
+
 		}
 		return $descriptions;
 	}
@@ -355,9 +369,235 @@ class cli{
 
 				$libraryName = explode("/", strtr($library, ["\\" => "/"]))[1];
 
+				var_dump($libraryName.", ".$version);
+
 				$description->addLibraryEnty(new LibraryEntry($libraryName, $library, $version, $branch));
 			}
 		}
+	}
+
+	public function analyzeProgram(DescriptionBase $description) : void{
+		$path = $description->getManifestPath();
+		$pluginManifestPath = $description->getPluginManifestPath();
+
+		if(!file_exists($pluginManifestPath)){
+			throw new \RuntimeException("plugin.yml(".$pluginManifestPath.") not found.");
+		}
+		$pluginManifest = yaml_parse(file_get_contents($description->getPluginManifestPath()));
+		$description->setMain($pluginManifest["main"]);
+
+		if(!file_exists($path)){
+			$description->setType(DescriptionType::TYPE_NORMAL);//github
+			//throw new \RuntimeException("manifest file ".$path." not found.");
+		}
+		$this->getLogger()->info("Program Analysis");
+		if(!file_exists($this->dir."VirionListCache.json")){
+			$this->getLogger()->info("Scraping the library list");
+			$this->getHttp()->getPoggitPopularVirionList();
+		}
+		$list = json_decode(file_get_contents($this->dir."VirionListCache.json"), true, 512, JSON_THROW_ON_ERROR);
+		$found = [];
+		$built_in_library = [];
+		foreach(new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($description->getRootPath())) as $path => $file){
+			if($file->isFile() === false) continue;
+			if(substr($path, strrpos($path, '.') + 1) === "php"){
+				$program = file_get_contents($file);
+
+				preg_match('/namespace ([^;\s\\\]*?).*/u', $program, $m);
+				preg_match_all('/use ([^;\s]*?);/u', $program, $m1);
+				preg_match('/namespace ([^;\s]*?);/u', $program, $m2);
+				//var_dump($m2);
+				foreach($m1[1] as $item){
+					if(!isset($m[1])||str_starts_with($item, "pocketmine")){
+						continue;
+					}
+
+					if(str_contains($item, $m[0])||str_starts_with($item, $m2[1])){
+						continue;
+					}
+
+					foreach($found as $value){
+						if(str_starts_with($item, $value)){
+							continue 2;
+						}
+					}
+
+					$test = explode("\\", $item);
+					$str = $test[0];
+					unset($test[0]);
+					foreach($test as $value){
+						$str .= "\\".$value;
+						if(($key1 = array_search($str, $list[3], true))){
+							$found[$key1] = $str;
+							break;
+						}
+					}
+				}
+			}
+		}
+		//var_dump($list[3]);
+		//var_dump($found);
+		foreach($found as $key => $item){
+			$libraryName = $list[1][$key];
+			$library = $list[0][$key];
+			$requestVersion = $list[4][$key];
+			$version = null;
+			$branch = "";//"*";
+			$commitsha = null;
+			$github_repo = $list[2][$key];
+			$array = $this->getHttp()->get("/repos/".$github_repo);
+			if(!isset($array["default_branch"])){
+				throw new \RuntimeException("github api default_branch not found.");
+			}
+			$default_branch = $array["default_branch"];
+			$branches = $this->getHttp()->get("/repos/".$github_repo."/branches");
+
+			//TODO: search virion.yml from github.
+			$this->getLogger()->info($libraryName.": searching for the latest version");
+			$count = 0;
+			$branch = $default_branch;
+			$branch_looked = [$branch => true];
+			do{
+				$this->getLogger()->info("looking branch: ".$branch);
+				$tmp_version = $this->fetchLibraryVersion($github_repo, $branch);
+				$tmp_api_version = $this->fetchLibraryApiVersion($github_repo, $branch);
+				if($tmp_api_version[0] !== "3"){
+					//sleep(1);
+					if($requestVersion === "null"||$requestVersion === $tmp_version){
+						$version = $tmp_version;
+						break;
+					}
+				}
+				$branch = $branches[$count++]["name"] ?? null;
+				if($branch === $default_branch){
+					$branch = $branches[$count++]["name"] ?? null;
+				}
+				$branch_looked[$branch] = true;
+			}while($branch !== null);
+			if($branch === null){
+				$this->getLogger()->error($libraryName.": version ".$default_branch." not found.");
+			}
+
+			foreach($branches as $index => $item1){
+				if($branch === $item1["name"]){
+					$commitsha = $item1["commit"]["sha"];
+					break;
+				}
+			}
+
+			if(!$this->hasCI($github_repo, $commitsha)){
+				$candidate = [];
+
+				$this->getLogger()->info("looking ".$branch." branch manifest history");
+				$array = $this->getHttp()->get("/repos/".$github_repo."/commits?path=virion.yml");
+
+				$count1 = 0;
+				foreach($array as $item3){
+					$count1++;
+					if(!isset($item3["parents"][0])){
+						throw new \RuntimeException("parents not found.");
+					}
+					$parentsha = $item3["parents"][0]["sha"];//1??
+					$this->getLogger()->info("looking ".$parentsha);
+					if($this->hasCI($github_repo, $parentsha)){
+						$tmp_version = $this->fetchLibraryVersion($github_repo, $parentsha);
+						$candidate[] = [$branch, $tmp_version, $parentsha];
+						$this->getLogger()->info("Found ".$tmp_version." ($branch, ".$parentsha.")");
+						break;
+					}
+					$this->getLogger()->info("=> ci not found");
+					if($count1 === 5){
+						$this->getLogger()->info("history search: give up");
+						break;
+					}
+				}
+
+				if(count($branches) !== count($branch_looked)){//$requestVersion !== null&&
+					$tmp_version = null;
+					$tmp_commitsha = null;
+					foreach($branches as $index => $item2){
+						$branch1 = $item2["name"];
+						if(isset($branch_looked[$branch1])){
+							continue;
+						}
+						$this->getLogger()->info("looking branch: ".$branch1);//branch
+						try{
+							$tmp_version = $this->fetchLibraryVersion($github_repo, $branch1);
+							$tmp_commitsha = $item2["commit"]["sha"];
+						}catch(HttpNotFoundException){}
+
+						if($requestVersion === "null"||$requestVersion === $tmp_version){
+							if($this->hasCI($github_repo, $tmp_commitsha)){
+								$candidate[] = [$branch1, $tmp_version, $tmp_commitsha];
+								break;
+							}
+						}
+					}
+				}
+
+				if(count($candidate) === 0){
+					$this->getHttp()->writeCache();
+					throw new CatchableException("library ".$libraryName." version not found.");
+				}
+				if(!$this->hasOption("n", "no-dialog")){
+					$key = 0;
+					foreach($candidate as $id => $item5){
+						$this->getLogger()->info("[".$id."]: ".$item5[1]." (".$item5[0].")");
+					}
+					$input = $this->getLogger()->requestInput("version [".$candidate[0][1]."/0]: ");
+
+					if(isset($candidate[$input])){
+						$key = $input;
+					}elseif(($search = array_search($input, array_column($candidate, 1), true)) !== false){
+						$key = $search;
+					}
+				}
+				$branch = $candidate[$key][0];
+				$version = $candidate[$key][1];
+				$this->getLogger()->info("selected branch: ".$version);
+			}
+
+			$this->getLogger()->info("found: ".$libraryName." ^".$version." (".$library.", ".$branch.")");
+			$description->addLibraryEnty(new LibraryEntry($libraryName, $library, "^".$version, $branch));
+		}
+		$this->getHttp()->writeCache();
+		//exit();
+	}
+
+	protected function hasCI(string $github_repo, string $commitsha) : bool{
+		$statuses = $this->getHttp()->get("/repos/".$github_repo."/statuses/".$commitsha);
+		foreach($statuses as $status){
+			if(isset($status["state"])&&isset($status["target_url"])&&$status["state"] === "success"&&str_contains($status["target_url"], ".pmmp.")){
+				return true;
+			}
+		}
+		return false;
+	}
+
+	protected function fetchLibraryVersion(string $github_repo, string $default_branch) : ?string{
+		$array = $this->getHttp()->get("/repos/".$github_repo."/contents/virion.yml?ref=".$default_branch);
+		$this->getHttp()->writeCache();
+		if(!isset($array["content"])){
+			return null;
+		}
+		$array = yaml_parse(base64_decode($array["content"]));
+		if(!isset($array["version"])){
+			return null;
+		}
+		return $array["version"];
+	}
+
+	protected function fetchLibraryApiVersion(string $github_repo, string $default_branch) : ?string{
+		$array = $this->getHttp()->get("/repos/".$github_repo."/contents/virion.yml?ref=".$default_branch);
+		$this->getHttp()->writeCache();
+		if(!isset($array["content"])){
+			return null;
+		}
+		$array = yaml_parse(base64_decode($array["content"]));
+		if(!isset($array["api"])){
+			return null;
+		}
+		return $array["api"];
 	}
 
 	/**
@@ -487,7 +727,7 @@ class cli{
 					throw new \RuntimeException("github api default_branch not found.");
 				}
 
-				if(!$this->hasOption("n", "no-dialog")){
+				if(count($branches) > 1&&!$this->hasOption("n", "no-dialog")){
 					foreach($branches as $name => $index){
 						$this->getLogger()->info("[".$name."]: ".$index);
 					}
@@ -606,15 +846,15 @@ class cli{
 	}
 
 	/**
-	 * @param string $short_options
+	 * @see getopt() native getopt function.
 	 * @param list<string> $long_options
 	 * @param list<string> $argv
 	 * @param list<string>|null $parameter
 	 * @param list<string> $after
 	 * @param bool $notallowUnknownOptions
 	 * @param list<string>|null $unknownOptions
+	 * @param string $short_options
 	 * @return array<string, string>
-	 * @see getopt() native getopt function.
 	 */
 	public static function getopt(string $short_options, array $long_options = [], array $argv = [], ?array &$parameter = null, array $after = [], bool $notallowUnknownOptions = false, array &$unknownOptions = null) : array{
 		$unknownOptions = [];
@@ -761,9 +1001,19 @@ class cli{
 //var_dump($argv);
 //var_dump(cli::getopt("ot:a:v::n", ["no-dialog", "token:", "output:"], $argv, $option,false, $unknownOptions));
 //var_dump([$unknownOptions,$option]);
+
 try{
 	(new cli())->main($argv);
 }catch(CatchableException $exception){
 	echo "[".get_class($exception)."]".PHP_EOL;
 	echo $exception->getMessage().PHP_EOL;
 }
+
+//$list = json_decode(file_get_contents(__DIR__."/VirionListCache.json"));
+//file_put_contents(__DIR__."/VirionListCache.json", json_encode(array_values($list), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+//
+//preg_match_all('/<li>\s*?<h3>\s*?.*?<a href="\/ci\/(.*?\/.*?\/.*?)">(.*?)<\/a>.*?https:\/\/github\.com\/(.*?)\'.*?<p class="remark">(.*?), Used by \d+ project\(s\).*?\(([^\)]*)\)<\/p>/usm', file_get_contents(__DIR__."/VirionListCache1.data"), $m);
+//unset($m[0]);
+//file_put_contents(__DIR__."/VirionListCache.json", json_encode(array_values($m),JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
+
+

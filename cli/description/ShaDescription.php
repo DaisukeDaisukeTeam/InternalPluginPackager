@@ -51,7 +51,12 @@ class ShaDescription extends DescriptionBase{
 		if($cachedir === null){
 			throw new \LogicException("\$this->getCacheName() === null");
 		}
-		return "phar://".$cachedir.DIRECTORY_SEPARATOR.$this->getName()."-".$this->getGithubCommitsha().DIRECTORY_SEPARATOR.$this->getZipPath();
+		$path = "phar://".$cachedir.DIRECTORY_SEPARATOR.$this->getZipInternalPath().DIRECTORY_SEPARATOR.$this->getZipPath();
+		if(!isset($this->zipInternalPath)&&!is_dir($path)){
+			$this->setZipInternalPath(scandir("phar://".$cachedir));
+			return $this->getRootPath();
+		}
+		return $path;
 	}
 
 	public function getUrlVersion() : ?string{
@@ -63,7 +68,7 @@ class ShaDescription extends DescriptionBase{
 	}
 
 	public function getCacheName() : string{
-		return substr($this->getGithubCommitsha(), 0, 20);
+		return substr($this->getGithubCommitsha(), 0, 10);
 	}
 
 	public function getCachePath() : ?string{

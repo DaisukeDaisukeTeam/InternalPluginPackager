@@ -7,6 +7,10 @@ class SimpleLogger{
 		echo $message.PHP_EOL;
 	}
 
+	public function infoWithoutNewLine(string $message) : void{
+		echo $message;
+	}
+
 	public function requestInput(string $message) : string{
 		echo $message;
 		return trim((string) fgets(STDIN));

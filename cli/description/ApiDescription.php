@@ -44,7 +44,16 @@ class ApiDescription extends DescriptionBase{
 		if($cachedir === null){
 			throw new \LogicException("\$this->getCacheName() === null");
 		}
-		return "phar://".$cachedir.DIRECTORY_SEPARATOR.$this->getName()."-".$this->getGithubCommitsha().DIRECTORY_SEPARATOR;
+		$path = "phar://".$cachedir.DIRECTORY_SEPARATOR.$this->getZipInternalPath().DIRECTORY_SEPARATOR.$this->getZipPath();
+		if(!isset($this->zipInternalPath)&&!is_dir($path)){
+			$result = scandir("phar://".$cachedir);
+			if(count($result) !== 1){
+				throw new \RuntimeException("count(\$result) !== 1");
+			}
+			$this->setZipInternalPath($result[0]);
+			return $this->getRootPath();
+		}
+		return $path;
 	}
 
 	public function getUrlVersion() : ?string{

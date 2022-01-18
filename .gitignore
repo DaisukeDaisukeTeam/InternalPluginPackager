@@ -3,7 +3,7 @@
 /.idea
 /custompluginloader.phar
 /cache
-/cache.json
+/cache/cache.json
 /cacert.pem
 /test
 /plugins.json
